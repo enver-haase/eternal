@@ -28,21 +28,9 @@ You now have three addresses: **A**, **B**, **C**. If, after reading the three a
 
 - **If A = −1**: Read one keyboard event from the human operator and place a number representing it into slot[B]. If no keyboard event is waiting, place 0. A key being pressed is reported as a positive number; the same key being released is reported as the negative of that number. The number is the key's physical scancode: the USB HID Keyboard/Keypad usage ID, not the letter printed on the key, so it does not change with keyboard layout.
 
-  For a common keyboard, use these numbers:
+  For a common keyboard, the scancode of every key is drawn below. On each key, the large symbol is the marking printed on it, and the small number beneath is that key's scancode:
 
-  ```
-  53  30 31 32 33 34 35 36 37 38 39 45 46 42
-      43 20 26  8 21 23 28 24 12 18 19 47 48 49
-       57  4 22  7  9 10 11 13 14 15 51 52 40
-       225 29 27  6 25  5 17 16 54 55 56 229
-       224 227 226      44      230 231 118 228
-
-  41 = Escape, 58-69 = F1-F12
-  73 = Insert, 74 = Home, 75 = Page Up, 76 = Delete, 77 = End, 78 = Page Down
-  79 = Right, 80 = Left, 81 = Down, 82 = Up
-  83 = Num Lock, 84 = Keypad /, 85 = Keypad *, 86 = Keypad -, 87 = Keypad +
-  88 = Keypad Enter, 89-99 = Keypad 1-9, 0, and .
-  ```
+  ![A picture of a common keyboard. Each key carries two labels: the large symbol is the marking printed on the key, and the small number beneath it is that key's scancode. For example, the space bar is 44, the letter A is 4, and the left Shift key is 225.](keyboard-scancodes.svg)
 
 - **If B = −1**: Display slot[A] as one character of text to the human operator.
 
