@@ -26,7 +26,11 @@ You now have three addresses: **A**, **B**, **C**. If, after reading the three a
 
 ### 2. Execute
 
-- **If A = −1**: Read one keypress from the human operator and place a number representing it into slot[B]. (If no key is pressed, place 0.)
+- **If A = −1**: Read one keyboard event from the human operator and place a number representing it into slot[B]. If no keyboard event is waiting, place 0. A key being pressed is reported as a positive number; the same key being released is reported as the negative of that number. The number is the key's physical scancode: the USB HID Keyboard/Keypad usage ID, not the letter printed on the key, so it does not change with keyboard layout.
+
+  For a common keyboard, the scancode of every key is drawn below. On each key, the large symbol is the marking printed on it, and the small number beneath is that key's scancode:
+
+  ![A picture of a common keyboard. Each key carries two labels: the large symbol is the marking printed on the key, and the small number beneath it is that key's scancode. For example, the space bar is 44, the letter A is 4, and the left Shift key is 225.](keyboard-scancodes.svg)
 
 - **If B = −1**: Display slot[A] as one character of text to the human operator.
 
