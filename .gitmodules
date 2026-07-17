@@ -9,4 +9,5 @@
 	url = https://github.com/adriancable/uclibc-ng
 [submodule "linux"]
 	path = linux
-	url = https://github.com/adriancable/linux
+	url = https://github.com/enver-haase/linux
+	branch = lunatix-mmu
