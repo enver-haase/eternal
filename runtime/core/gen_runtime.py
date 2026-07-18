@@ -23,36 +23,44 @@ Individual runtime functions are in separate files:
 """
 
 # Memory addresses - BYTE addresses (word * 4) for CHAR_BIT=8 support
-# VM divides by 4 when accessing memory
-ADDR_Z = 3 * 4        # = 12
-ADDR_SP = 4 * 4       # = 16
-ADDR_RA = 5 * 4       # = 20
-ADDR_ZERO = 36 * 4    # = 144
-ADDR_MINUS_ONE = 38 * 4  # = 152, Constant -1
-ADDR_ONE = 39 * 4      # = 156, Constant 1
-# New ABI registers (R20-R24): word addresses 24-28, byte addresses 96-112
-ADDR_R20 = 24 * 4     # = 96, Return value register (new ABI)
-ADDR_R21 = 25 * 4     # = 100, First argument register (new ABI)
-ADDR_R22 = 26 * 4     # = 104, Second argument register (new ABI)
-ADDR_R23 = 27 * 4     # = 108, Third argument register (new ABI)
-ADDR_R24 = 28 * 4     # = 112, Fourth argument register (new ABI)
-ADDR_T0 = 40 * 4      # = 160, Temporaries
-ADDR_T1 = 41 * 4      # = 164
-ADDR_T2 = 42 * 4      # = 168
-ADDR_T3 = 43 * 4      # = 172
-ADDR_T4 = 44 * 4      # = 176
-ADDR_T5 = 45 * 4      # = 180
-ADDR_T6 = 46 * 4      # = 184
-ADDR_T7 = 47 * 4      # = 188
-ADDR_T8 = 48 * 4      # = 192
-ADDR_T9 = 49 * 4      # = 196
-ADDR_T10 = 50 * 4     # = 200
-ADDR_T11 = 51 * 4     # = 204
-ADDR_T12 = 52 * 4     # = 208
-ADDR_T13 = 53 * 4     # = 212
-ADDR_T14 = 54 * 4     # = 216
-ADDR_T15 = 55 * 4     # = 220
-# Sentinel for halt/output: -4 (becomes -1 after VM's /4)
+# VM divides by 4 when accessing memory.
+#
+# ESI register-file base, in WORDS. MUST match the toolchain's SUBLEQ_REG_BASE
+# and the kernel's asm/subleq-regs.h REG_BASE (bytes = REG_BASE*4).
+#   0    = cable stock ABI (register file in page 0).
+#   1024 = register file relocated to page 1 (page 0 reserved for I/O + vectors).
+# Only the register cells below carry the base; the constant pool, INDIRECT_FLAG
+# and ADDR_SPECIAL are NOT part of the register file and are not offset.
+REG_BASE = 1024
+ADDR_Z = (3 + REG_BASE) * 4        # word 3
+ADDR_SP = (4 + REG_BASE) * 4       # word 4
+ADDR_RA = (5 + REG_BASE) * 4       # word 5
+ADDR_ZERO = (36 + REG_BASE) * 4    # word 36
+ADDR_MINUS_ONE = (38 + REG_BASE) * 4  # word 38, Constant -1
+ADDR_ONE = (39 + REG_BASE) * 4      # word 39, Constant 1
+# ABI registers (R20-R24): word addresses 24-28
+ADDR_R20 = (24 + REG_BASE) * 4     # Return value register
+ADDR_R21 = (25 + REG_BASE) * 4     # First argument register
+ADDR_R22 = (26 + REG_BASE) * 4     # Second argument register
+ADDR_R23 = (27 + REG_BASE) * 4     # Third argument register
+ADDR_R24 = (28 + REG_BASE) * 4     # Fourth argument register
+ADDR_T0 = (40 + REG_BASE) * 4      # Temporaries
+ADDR_T1 = (41 + REG_BASE) * 4
+ADDR_T2 = (42 + REG_BASE) * 4
+ADDR_T3 = (43 + REG_BASE) * 4
+ADDR_T4 = (44 + REG_BASE) * 4
+ADDR_T5 = (45 + REG_BASE) * 4
+ADDR_T6 = (46 + REG_BASE) * 4
+ADDR_T7 = (47 + REG_BASE) * 4
+ADDR_T8 = (48 + REG_BASE) * 4
+ADDR_T9 = (49 + REG_BASE) * 4
+ADDR_T10 = (50 + REG_BASE) * 4
+ADDR_T11 = (51 + REG_BASE) * 4
+ADDR_T12 = (52 + REG_BASE) * 4
+ADDR_T13 = (53 + REG_BASE) * 4
+ADDR_T14 = (54 + REG_BASE) * 4
+ADDR_T15 = (55 + REG_BASE) * 4
+# Sentinel for halt/output: -4 (becomes -1 after VM's /4). NOT a register.
 ADDR_SPECIAL = -4
 
 # Subleq+ indirect addressing flag (bit 1)

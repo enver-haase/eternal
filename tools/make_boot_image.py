@@ -31,40 +31,54 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 LLVM_BIN = os.path.join(PROJECT_ROOT, "llvm-project", "build", "bin")
 
 
+# ESI register-file base, in WORDS. MUST match the toolchain's SUBLEQ_REG_BASE
+# and the kernel's asm/subleq-regs.h REG_BASE (=REG_BASE*4 bytes), and the kernel
+# link base (0x1000 for REG_BASE=0, 0x2000 for REG_BASE=1024).
+#   0    = cable stock ABI (register file in page 0).
+#   1024 = register file relocated to page 1 (page 0 reserved for I/O + vectors).
+REG_BASE = 1024
+
+
 def create_boot_sequence(text_start, stack_size, main_offset=0):
-    """Create the boot sequence based on text_start."""
+    """Create the boot sequence based on text_start.
+
+    With REG_BASE=1024 the boot area is pages 0+1: page 0 = bootstrap + VM I/O +
+    (disabled) interrupt vectors + kernel scratch; page 1 = the ESI register file.
+    Kernel text starts at text_start (page 2). With REG_BASE=0 it is just page 0,
+    reproducing cable's stock layout.
+    """
     # Boot area is all the words before text_start
     boot_words = text_start // 4
     boot = [0] * boot_words
-    
-    # Word 0: Interrupt handler address (0 = interrupts disabled)
-    # Word 1: Saved PC (where to return after interrupt)
-    # Word 0-2 also form the initial jump: subleq(0, 0, 12) - jump to word 3
+
+    # Word 0-2: initial jump subleq(0,0,12) -> word 3. Word 0/1 also serve as the
+    # (disabled) interrupt-handler / saved-PC cells.
     boot[0] = 0       # A = byte addr 0 (also: interrupt handler = 0 = disabled)
     boot[1] = 0       # B = byte addr 0 (also: saved PC placeholder)
     boot[2] = 12      # C = byte addr 12 (word 3)
-    
-    # Word 3-5: subleq(24, SP_init, jump_addr) - init SP, jump to last 3 words
-    # This is a special trick: word 4 contains the SP init VALUE (not address)
-    # subleq reads from mem[24]=0, writes to mem[SP_init], then branches to jump target
+
+    # Word 3-5: unconditional jump subleq(0,0,jump_to_main) -> the last 3-word
+    # 'jump to main' instruction. (Formerly abused word 4 to init SP via overlap;
+    # with the register file moved to page 1, SP is pre-loaded directly below.)
     jump_to_main_addr = (boot_words - 3) * 4  # byte address of last 3-word jump
-    boot[3] = 144               # A = ADDR_ZERO (byte addr 144 = word 36)
-    boot[4] = stack_size        # B = SP init value (stack size in bytes)
+    boot[3] = 0                 # A = byte addr 0 (mem[0]=0)
+    boot[4] = 0                 # B = byte addr 0 -> mem[0]-=mem[0]=0, branch taken
     boot[5] = jump_to_main_addr # C = byte addr of jump-to-main instruction
 
-    # Video RAM location
-    boot[6] = 0x17F9C000        # Note: this is in words (not bytes)
-    
-    # Runtime constants
-    boot[36] = 0   # ZERO constant (word 36 = byte 144)
-    boot[38] = -1  # MINUS_ONE constant
-    boot[39] = 1   # ONE constant
-    
-    # Last 3 words: Jump to main at text_start (or offset if provided)
-    boot[-3] = 12                      # A = byte addr of Z (word 3)  
-    boot[-2] = 12                      # B = byte addr of Z
+    # Word 6: video RAM location (VM cell, in words; does not move).
+    boot[6] = 0x17F9C000
+
+    # ESI register-file cells at their (relocated) homes.
+    boot[4 + REG_BASE]  = stack_size  # SP init value (stack top)
+    boot[36 + REG_BASE] = 0           # ZERO constant
+    boot[38 + REG_BASE] = -1          # MINUS_ONE constant
+    boot[39 + REG_BASE] = 1           # ONE constant
+
+    # Last 3 words: jump to main. subleq(12,12,main): mem[word3]-=mem[word3]=0.
+    boot[-3] = 12                      # A = byte addr 12 (word 3, =0 in boot area)
+    boot[-2] = 12                      # B = byte addr 12
     boot[-1] = text_start + main_offset  # C = byte addr of main
-    
+
     return boot
 
 
@@ -106,8 +120,9 @@ def main():
     parser = argparse.ArgumentParser(
         description='Create a bootable Subleq image from an ELF file')
     parser.add_argument('elf_file', help='Input ELF file')
-    parser.add_argument('--text-start', type=int, default=4096,
-                        help='Byte address where code starts (default: 4096)')
+    parser.add_argument('--text-start', type=int, default=(4096 * (2 if REG_BASE else 1)),
+                        help='Byte address where code starts (default: 8192 for '
+                             'REG_BASE=1024 register-file-in-page-1, else 4096)')
     parser.add_argument('--stack-size', type=int, default=0x800000,
                         help='Stack pointer initial value in bytes (default: 8MB)')
     parser.add_argument('--llvm-bin', type=str, default=LLVM_BIN,
