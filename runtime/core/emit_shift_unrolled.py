@@ -20,12 +20,12 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gen_runtime import (emit_return_sequence, ADDR_Z, ADDR_SP, ADDR_ZERO, ADDR_R20, ADDR_R21, ADDR_R22, ADDR_T0, ADDR_T1, ADDR_T2, ADDR_T3, const_from_pool, ADDR_ONE, ADDR_MINUS_ONE)
+from gen_runtime import (REG_BASE, emit_return_sequence, ADDR_Z, ADDR_SP, ADDR_ZERO, ADDR_R20, ADDR_R21, ADDR_R22, ADDR_T0, ADDR_T1, ADDR_T2, ADDR_T3, const_from_pool, ADDR_ONE, ADDR_MINUS_ONE)
 
 # Additional temporary registers
-ADDR_T4 = 44 * 4      # = 176
-ADDR_T5 = 45 * 4      # = 180
-ADDR_T6 = 46 * 4      # = 184
+ADDR_T4 = (44 + REG_BASE) * 4      # = 176
+ADDR_T5 = (45 + REG_BASE) * 4      # = 180
+ADDR_T6 = (46 + REG_BASE) * 4      # = 184
 
 
 def emit_binary_dispatch(asm, lo, hi, prefix, reg):

@@ -30,15 +30,15 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gen_runtime import (emit_return_sequence, ADDR_Z, ADDR_SP, ADDR_ZERO, ADDR_R20, ADDR_R21, ADDR_R22, ADDR_T0, ADDR_T1, ADDR_T2, ADDR_T3, ADDR_T11, INDIRECT_FLAG, ADDR_R23, ADDR_R24, const_from_pool)
+from gen_runtime import (REG_BASE, emit_return_sequence, ADDR_Z, ADDR_SP, ADDR_ZERO, ADDR_R20, ADDR_R21, ADDR_R22, ADDR_T0, ADDR_T1, ADDR_T2, ADDR_T3, ADDR_T11, INDIRECT_FLAG, ADDR_R23, ADDR_R24, const_from_pool)
 
-ADDR_T4 = 44 * 4
-ADDR_T5 = 45 * 4
-ADDR_T6 = 46 * 4
-ADDR_T7 = 47 * 4
-ADDR_T8 = 48 * 4
-ADDR_T9 = 49 * 4
-ADDR_T10 = 50 * 4
+ADDR_T4 = (44 + REG_BASE) * 4
+ADDR_T5 = (45 + REG_BASE) * 4
+ADDR_T6 = (46 + REG_BASE) * 4
+ADDR_T7 = (47 + REG_BASE) * 4
+ADDR_T8 = (48 + REG_BASE) * 4
+ADDR_T9 = (49 + REG_BASE) * 4
+ADDR_T10 = (50 + REG_BASE) * 4
 
 
 def emit_inline_srl_lattice(asm, shift_amount, input_reg, result_reg, prefix, const_prefix, done_label):

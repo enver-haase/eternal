@@ -12,14 +12,14 @@ AGGRESSIVE OPTIMIZATIONS:
 7. Direct R20 accumulation: extraction lattice writes result to R20 directly, saves 4 ops (no copy)
 """
 
-from gen_runtime import (ADDR_Z, ADDR_SP, ADDR_T0, ADDR_R20, ADDR_R21, INDIRECT_FLAG, emit_return_sequence, ADDR_ZERO, const_from_pool, ADDR_ONE, ADDR_MINUS_ONE)
+from gen_runtime import (REG_BASE, ADDR_Z, ADDR_SP, ADDR_T0, ADDR_R20, ADDR_R21, INDIRECT_FLAG, emit_return_sequence, ADDR_ZERO, const_from_pool, ADDR_ONE, ADDR_MINUS_ONE)
 
 # Additional local constants
-ADDR_T1 = 41 * 4      # = 164
-ADDR_T3 = 43 * 4      # = 172
-ADDR_T5 = 45 * 4      # = 180
-ADDR_T6 = 46 * 4      # = 184
-ADDR_T7 = 47 * 4      # = 188
+ADDR_T1 = (41 + REG_BASE) * 4      # = 164
+ADDR_T3 = (43 + REG_BASE) * 4      # = 172
+ADDR_T5 = (45 + REG_BASE) * 4      # = 180
+ADDR_T6 = (46 + REG_BASE) * 4      # = 184
+ADDR_T7 = (47 + REG_BASE) * 4      # = 188
 
 def emit_lattice_extract(asm, shift, prefix):
     """
