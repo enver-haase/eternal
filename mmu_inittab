@@ -1,0 +1,6 @@
+::sysinit:/bin/busybox echo =========================================
+::sysinit:/bin/busybox echo BusyBox on MMU-protected subleq Linux!
+::sysinit:/bin/busybox uname -a
+::sysinit:/bin/busybox echo =========================================
+::sysinit:/bin/busybox mount -t proc proc /proc
+console::respawn:/bin/busybox sh

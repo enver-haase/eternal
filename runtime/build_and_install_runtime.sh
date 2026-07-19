@@ -50,6 +50,14 @@ echo "Step 3: Building soft-float runtime..."
     "$SCRIPT_DIR/fpu/subleq_runtime_softfloat.c"
 echo "  Built: fpu/subleq_runtime_softfloat.o"
 
+# Step 3B: Bundle the core + soft-float runtime into libsubleq_rt.a and install it.
+# The Subleq clang driver auto-links this for static ET_EXEC Linux binaries: under
+# NOMMU the kernel resolves __subleq_* soft-math/mem/byte helpers at load time, but
+# a memory-protected MMU static binary (generic binfmt_elf) must link them in.
+"$AR" rcs "$SYSROOT/lib/libsubleq_rt.a" \
+    "$SCRIPT_DIR/core/subleq_runtime.o" "$SCRIPT_DIR/fpu/subleq_runtime_softfloat.o"
+echo "  Installed: runtime/sysroot/lib/libsubleq_rt.a"
+
 # Step 4: Copy soft-float runtime to Linux kernel
 echo "Step 4: Copying soft-float runtime to Linux kernel..."
 cp "$SCRIPT_DIR/fpu/subleq_runtime_softfloat.c" "$LINUX_LIB/"
