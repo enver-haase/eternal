@@ -44,6 +44,6 @@ build/device/%.o: src/device/%.c
 .PHONY:
 link: $(TARGET_OBJS)
 	@echo "Linking..."
-	@$(CC) $(CCFLAGS) -o doom $(TARGET_OBJS)
+	@$(CC) $(CCFLAGS) -static -no-pie -o doom $(TARGET_OBJS)
 
 doom: link
