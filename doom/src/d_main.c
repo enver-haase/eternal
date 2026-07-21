@@ -374,8 +374,22 @@ void D_DoomLoop (void)
     while (1)
     {
 	// frame syncronous IO operations
-	I_StartFrame ();                
-	
+	I_StartFrame ();
+
+	// Real-time cap: on the slow Subleq VM the loop otherwise spins D_Display
+	// + the sound path flat out, starving keyboard polling (kbd-polls/s ~= 0,
+	// keys land minutes late) and pushing audio off wall-clock (garbled OPL,
+	// stuttering SFX). Yield until the 35 Hz game clock advances so the whole
+	// loop — render, game logic, and audio emission — runs at real time.
+	if (!singletics)
+	{
+	    static int d_lasttic = 0;
+	    int t;
+	    while ((t = I_GetTime ()) <= d_lasttic)
+		usleep (1000);   // 1 ms; releases the guest so the kernel polls input
+	    d_lasttic = t;
+	}
+
 	// process one or more tics
 	if (singletics)
 	{
