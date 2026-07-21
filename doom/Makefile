@@ -2,7 +2,7 @@
 #CC=aarch64-linux-gnu-gcc
 
 SOURCES = $(patsubst src/%, %, $(wildcard src/*.c))
-SOURCES += device/main.c device/i_fb_video.c device/i_no_sound.c device/i_no_music.c
+SOURCES += device/main.c device/i_fb_video.c device/i_snd_sound.c device/i_no_music.c
 OBJECTS = $(patsubst %.c, %.o, $(SOURCES))
 
 # Assembly sources (Subleq hand-optimized)

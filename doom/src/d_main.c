@@ -399,15 +399,11 @@ void D_DoomLoop (void)
 	// Update display, next frame, with current state.
 	D_Display ();
 
-//#ifndef SNDSERV
-//    // Sound mixing for the buffer is snychronous.
-//    I_UpdateSound();
-//#endif
-//    // Synchronous sound output is explicitly called.
-//#ifndef SNDINTR
-//    // Update sound output.
-//    I_SubmitSound();
-//#endif
+	// Sound mixing for the buffer is synchronous: mix the active SFX
+	// channels and push the block to /dev/dsp. The VM's sound card plays
+	// it back at native speed (Layer 1/2).
+	I_UpdateSound();
+	I_SubmitSound();
     }
 }
 
