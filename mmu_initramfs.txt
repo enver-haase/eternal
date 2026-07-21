@@ -17,13 +17,17 @@ nod /dev/ttyS0 0666 0 0 c 4 64
 nod /dev/tty 0666 0 0 c 5 0
 nod /dev/tty0 0620 0 0 c 4 0
 nod /dev/fb0 0660 0 0 c 29 0
+# (/dev/dsp + /dev/opl are provided by devtmpfs, which /doom mounts at startup.)
 
 # The static busybox and init (busybox dispatches on argv[0] basename)
 file /bin/busybox ../busybox/busybox 0755 0 0
-# DEBUG: run doom directly as PID 1 (kernel_execve path) to isolate execve-vs-load
+# fbdoom runs directly as PID 1 (kernel_execve path); it mounts devtmpfs itself.
 slink /init /doom 0777 0 0
 slink /sbin/init /bin/busybox 0777 0 0
 slink /bin/sh /bin/busybox 0777 0 0
+
+# Sound-device self-test (static ET_EXEC) — kept as a diagnostic tool.
+file /sndtest ../sndtest 0755 0 0
 
 # fbdoom (static ET_EXEC, page-1) + shareware WAD (found via cwd "." = /)
 file /doom ../doom/doom 0755 0 0

@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include <termios.h>
 #include <sys/ioctl.h>
+#include <sys/mount.h>
+#include <sys/stat.h>
 #include <linux/kd.h>
 
 #include "doomdef.h"
@@ -86,6 +88,13 @@ int main(int argc, const char** argv)
 {
     myargc = argc;
     myargv = argv;
+
+    // We run as PID 1 and the initramfs is the rootfs, so the kernel does not
+    // auto-mount devtmpfs. Mount it ourselves so the device nodes the drivers
+    // register (/dev/dsp and /dev/opl for sound, plus /dev/fb0) actually exist.
+    // Harmless if it fails or is already mounted; sound just stays silent then.
+    mkdir("/dev", 0755);
+    mount("dev", "/dev", "devtmpfs", 0, NULL);
 
     // Save original terminal settings
     tcgetattr(0, &orig_term);
