@@ -356,8 +356,6 @@ void D_Display (void)
 //
 extern  boolean         demorecording;
 
-// Last game tic at which we rendered a frame; used by the real-time loop cap.
-static int d_last_frame_tic = 0;
 
 void D_DoomLoop (void)
 {
@@ -379,31 +377,10 @@ void D_DoomLoop (void)
 	// frame syncronous IO operations
 	I_StartFrame ();
 
-	// Real-time cap: on the slow Subleq VM the loop otherwise spins D_Display
-	// + the sound path flat out, starving keyboard polling (kbd-polls/s ~= 0,
-	// keys land minutes late) and pushing audio off wall-clock (garbled OPL,
-	// stuttering SFX). Busy-wait until the 35 Hz game clock advances so render,
-	// game logic and audio emission all run at real time. We spin on I_GetTime
-	// (a gettimeofday syscall — each iteration traps to the kernel, letting it
-	// poll input; the scheduler quantum also preempts us) rather than usleep():
-	// usleep→nanosleep pulled a bad relocation into the static MMU binary and
-	// wild-jumped init to a SIGSEGV. No sleep syscall needed.
-	if (!singletics)
-	{
-	    // The loop is compute-bound on this VM (a frame's work already exceeds
-	    // one 35 Hz tic), so a pure real-time cap never waits and never donates
-	    // super-mode time -> the kernel's keyboard-poll timer starves (kbd ~0,
-	    // keys dead) and audio drains off wall-clock. Sleep a fixed slice every
-	    // frame so the kernel actually runs (polls input, drains the PCM ring),
-	    // and additionally pace toward 35 Hz when we happen to be ahead.
-	    // usleep()->nanosleep is safe here (the earlier SIGSEGV was the .config
-	    // ABI mismatch, not this call).
-	    int t;
-	    while ((t = I_GetTime ()) <= d_last_frame_tic)
-		usleep (5000);
-	    usleep (8000);   // ~8 ms/frame donated to the kernel unconditionally
-	    d_last_frame_tic = t;
-	}
+	// (No per-frame yield here: NOMMU DOOM runs in supervisor mode, so the
+	// kernel timer ticks for free — input + audio work without donating time.
+	// The MMU port needs a yield/preemption fix instead, tracked separately;
+	// on MMU DOOM is also compute-bound at ~3 fps, a VM-perf problem.)
 
 	// process one or more tics
 	if (singletics)
