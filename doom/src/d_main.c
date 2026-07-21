@@ -399,12 +399,34 @@ void D_DoomLoop (void)
 	// Update display, next frame, with current state.
 	D_Display ();
 
-	// Sound mixing for the buffer is synchronous: mix the active SFX
-	// channels and push the block to /dev/dsp. The VM's sound card plays
-	// it back at native speed (Layer 1/2).
-	I_UpdateSound();
-	I_SubmitSound();
-	// Advance the OPL music sequencer (writes registers to /dev/opl).
+	// Sound mixing is synchronous. Classic DOOM mixed a 512-frame block every
+	// DoomLoop iteration, but this loop is uncapped (only game *logic* is
+	// throttled to 35 Hz), so on the slow Subleq VM that mixes hundreds of
+	// blocks/s while the host only consumes ~21.5/s (11025/512) — burning the
+	// guest's cycles and starving input. Pace it to real time instead: mix +
+	// submit only when a 512-frame block is actually owed (~0.615 blocks per
+	// 35 Hz tic), tracked via I_GetTime.
+	{
+	    static int snd_frac = 0;      // thousandths of a 512-frame block owed
+	    static int snd_last = 0;
+	    int now = I_GetTime();
+	    int dt = now - snd_last;
+	    if (dt > 0)
+	    {
+		snd_last = now;
+		if (dt > 35) dt = 35;                 // clamp a long stall to ~1 s
+		snd_frac += dt * 615;                 // 0.615 blocks/tic * 1000
+		int budget = 4;                       // cap catch-up bursts
+		while (snd_frac >= 1000 && budget-- > 0)
+		{
+		    snd_frac -= 1000;
+		    I_UpdateSound();
+		    I_SubmitSound();
+		}
+	    }
+	}
+	// Advance the OPL music sequencer (writes registers to /dev/opl);
+	// self-paced by I_GetTime, cheap, safe to call every iteration.
 	I_UpdateMusic();
     }
 }
