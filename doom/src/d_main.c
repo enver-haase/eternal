@@ -356,6 +356,9 @@ void D_Display (void)
 //
 extern  boolean         demorecording;
 
+// Last game tic at which we rendered a frame; used by the real-time loop cap.
+static int d_last_frame_tic = 0;
+
 void D_DoomLoop (void)
 {
     if (demorecording)
@@ -379,15 +382,18 @@ void D_DoomLoop (void)
 	// Real-time cap: on the slow Subleq VM the loop otherwise spins D_Display
 	// + the sound path flat out, starving keyboard polling (kbd-polls/s ~= 0,
 	// keys land minutes late) and pushing audio off wall-clock (garbled OPL,
-	// stuttering SFX). Yield until the 35 Hz game clock advances so the whole
-	// loop — render, game logic, and audio emission — runs at real time.
+	// stuttering SFX). Busy-wait until the 35 Hz game clock advances so render,
+	// game logic and audio emission all run at real time. We spin on I_GetTime
+	// (a gettimeofday syscall — each iteration traps to the kernel, letting it
+	// poll input; the scheduler quantum also preempts us) rather than usleep():
+	// usleep→nanosleep pulled a bad relocation into the static MMU binary and
+	// wild-jumped init to a SIGSEGV. No sleep syscall needed.
 	if (!singletics)
 	{
-	    static int d_lasttic = 0;
-	    int t;
-	    while ((t = I_GetTime ()) <= d_lasttic)
-		usleep (1000);   // 1 ms; releases the guest so the kernel polls input
-	    d_lasttic = t;
+	    int t = I_GetTime ();
+	    while (t <= d_last_frame_tic)
+		t = I_GetTime ();
+	    d_last_frame_tic = t;
 	}
 
 	// process one or more tics
