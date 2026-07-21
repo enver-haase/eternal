@@ -390,9 +390,18 @@ void D_DoomLoop (void)
 	// wild-jumped init to a SIGSEGV. No sleep syscall needed.
 	if (!singletics)
 	{
-	    int t = I_GetTime ();
-	    while (t <= d_last_frame_tic)
-		t = I_GetTime ();
+	    // The loop is compute-bound on this VM (a frame's work already exceeds
+	    // one 35 Hz tic), so a pure real-time cap never waits and never donates
+	    // super-mode time -> the kernel's keyboard-poll timer starves (kbd ~0,
+	    // keys dead) and audio drains off wall-clock. Sleep a fixed slice every
+	    // frame so the kernel actually runs (polls input, drains the PCM ring),
+	    // and additionally pace toward 35 Hz when we happen to be ahead.
+	    // usleep()->nanosleep is safe here (the earlier SIGSEGV was the .config
+	    // ABI mismatch, not this call).
+	    int t;
+	    while ((t = I_GetTime ()) <= d_last_frame_tic)
+		usleep (5000);
+	    usleep (8000);   // ~8 ms/frame donated to the kernel unconditionally
 	    d_last_frame_tic = t;
 	}
 
