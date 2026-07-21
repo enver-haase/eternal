@@ -1,0 +1,451 @@
+//
+// Music backend for the lunatix Subleq VM: plays DOOM MUS lumps on the VM's
+// OPL3 chip by translating them to OPL register writes on /dev/opl.
+//
+// Classic Linux DOOM shipped no working music (the DOS DMX library was
+// proprietary and left out of the source release). This restores it the way
+// chocolate-doom's OPL player does — using the WAD's GENMIDI instrument bank —
+// but the FM synthesis itself runs in the VM (Layer 1), so the guest only does
+// the cheap MUS -> register translation.
+//
+// Nine 2-operator melodic voices (OPL2-compatible layout, OPL3 stereo enabled).
+// MUS is parsed directly (it is simpler than MIDI and is what I_RegisterSong
+// receives). Driven by I_UpdateMusic(), called once per game loop.
+//
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+#include "z_zone.h"
+#include "i_system.h"
+#include "w_wad.h"
+#include "doomdef.h"
+#include "doomstat.h"
+#include "i_sound.h"
+
+typedef unsigned char u8;
+
+// ------------------------------------------------------------------ OPL access
+
+static int opl_fd = -1;
+
+static void opl(int reg, int val)
+{
+    if (opl_fd < 0)
+        return;
+    unsigned int packed = (unsigned int)(((reg & 0x1FF) << 8) | (val & 0xFF));
+    (void)!write(opl_fd, &packed, 4);
+}
+
+// Modulator/carrier operator register offsets for the 9 melodic channels.
+static const u8 op_off[9][2] = {
+    {0x00, 0x03}, {0x01, 0x04}, {0x02, 0x05},
+    {0x08, 0x0B}, {0x09, 0x0C}, {0x0A, 0x0D},
+    {0x10, 0x13}, {0x11, 0x14}, {0x12, 0x15},
+};
+
+// F-number per semitone; block = clamp(note/12 - 1, 0, 7). Gives exact pitches
+// at the OPL3 native 49716 Hz (see the table derivation in the commit).
+static const unsigned short note_fnum[12] = {
+    0x159, 0x16D, 0x183, 0x19A, 0x1B3, 0x1CC,
+    0x1E8, 0x205, 0x223, 0x244, 0x267, 0x28B,
+};
+
+// --------------------------------------------------------------- GENMIDI bank
+
+// The GENMIDI lump: 8-byte header "#OPL_II#", then 175 * 36-byte instruments.
+// We read fields by byte offset to avoid any packed-struct/alignment surprises
+// on the Subleq backend. Instrument layout (36 bytes):
+//   +0  u16 flags        (bit0 = fixed pitch, bit2 = double voice)
+//   +2  u8  fine tuning
+//   +3  u8  fixed note
+//   +4  voice 0 (16 bytes), +20 voice 1 (16 bytes)
+// Voice layout (16 bytes): modulator op (6), feedback (1), carrier op (6),
+//   unused (1), s16 note offset (2). Operator (6 bytes): tremolo, attack,
+//   sustain, waveform, key-scale, level.
+#define GENMIDI_NUM      175
+#define INSTR_SIZE       36
+#define GENMIDI_FLAG_FIXED 0x01
+
+static const u8 *genmidi;   // -> first instrument (past the 8-byte header)
+
+static const u8 *instr_ptr(int i)
+{
+    if (i < 0) i = 0;
+    if (i >= GENMIDI_NUM) i = GENMIDI_NUM - 1;
+    return genmidi + i * INSTR_SIZE;
+}
+
+// A voice within an instrument (voice 0 used); returns pointer to its 16 bytes.
+static const u8 *instr_voice(const u8 *instr)
+{
+    return instr + 4;
+}
+
+// ---------------------------------------------------------------- voice state
+
+typedef struct {
+    int      used;      // currently keyed on
+    int      midi_ch;   // MUS channel that owns it
+    int      note;      // MUS note playing
+    unsigned age;       // allocation order, for oldest-steal
+    u8       b0;        // last 0xB0 value (block+fnum-hi), for clean key-off
+} oplvoice_t;
+
+static oplvoice_t voices[9];
+static unsigned   voice_clock = 0;
+
+// --------------------------------------------------------------- MUS channels
+
+typedef struct {
+    int instrument;     // GENMIDI index (program)
+    int volume;         // 0..127
+} muschan_t;
+
+static muschan_t chans[16];
+
+static int music_volume = 15;   // 0..15 (I_SetMusicVolume)
+
+// -------------------------------------------------------------- MUS sequencer
+
+static const u8 *song_base;     // start of the cached lump
+static const u8 *mus_pos;       // current read position
+static const u8 *mus_end;       // end of score
+static const u8 *mus_loop;      // score start, for looping
+static int       mus_playing;
+static int       mus_paused;
+static int       mus_looping;
+static int       mus_delay;     // ticks remaining before next event group
+
+// MUS score tick rate (140 Hz). The sequencer is driven from DOOM's game clock
+// (I_GetTime, 35 Hz tics) so it advances whenever the game does: 140/35 = 4 MUS
+// ticks per game tic. Robust on the slow VM (no dependence on render frame rate
+// or a fine wall-clock); tempo tracks game time, as with the original.
+#define MUS_TICKS_PER_GAMETIC 4
+
+static int last_gametic = -1;
+
+// ------------------------------------------------------------ OPL programming
+
+static void opl_program_voice(int v, const u8 *voice)
+{
+    int mo = op_off[v][0], co = op_off[v][1];
+    const u8 *mod = voice;
+    const u8 *car = voice + 7;
+    int fb = voice[6];
+
+    opl(0x20 + mo, mod[0]); opl(0x60 + mo, mod[1]); opl(0x80 + mo, mod[2]); opl(0xE0 + mo, mod[3]);
+    opl(0x40 + mo, (mod[4] & 0xC0) | (mod[5] & 0x3F));   // modulator level fixed from patch
+    opl(0x20 + co, car[0]); opl(0x60 + co, car[1]); opl(0x80 + co, car[2]); opl(0xE0 + co, car[3]);
+    opl(0xC0 + v, (fb & 0x0F) | 0x30);                   // feedback/conn + L,R (OPL3 stereo)
+}
+
+// Set the carrier output level from the patch base + MUS/master volume.
+static void opl_set_level(int v, const u8 *voice, int midi_ch)
+{
+    int co = op_off[v][1];
+    const u8 *car = voice + 7;
+    int base = car[5] & 0x3F;                            // patch attenuation (0=loud)
+    int vol  = (chans[midi_ch].volume * music_volume) / 15;  // 0..127
+    if (vol > 127) vol = 127;
+    int att  = base + ((63 - base) * (127 - vol)) / 127;    // louder vol -> less att
+    if (att > 63) att = 63;
+    opl(0x40 + co, (car[4] & 0xC0) | (att & 0x3F));
+}
+
+static void opl_keyon(int v, int note)
+{
+    int block = note / 12 - 1;
+    if (block < 0) block = 0;
+    if (block > 7) block = 7;
+    int fnum = note_fnum[note % 12];
+    opl(0xA0 + v, fnum & 0xFF);
+    voices[v].b0 = (u8)((block << 2) | ((fnum >> 8) & 3));
+    opl(0xB0 + v, 0x20 | voices[v].b0);                 // 0x20 = key-on
+}
+
+static void opl_keyoff(int v)
+{
+    opl(0xB0 + v, voices[v].b0);                        // clear key-on, keep block/fnum
+}
+
+// -------------------------------------------------------------- voice alloc
+
+static int voice_alloc(int midi_ch, int note)
+{
+    int i, oldest = 0;
+    unsigned oldest_age = 0xFFFFFFFFu;
+    for (i = 0; i < 9; i++) {
+        if (!voices[i].used) { oldest = i; break; }
+        if (voices[i].age < oldest_age) { oldest_age = voices[i].age; oldest = i; }
+    }
+    if (voices[oldest].used)
+        opl_keyoff(oldest);
+    voices[oldest].used = 1;
+    voices[oldest].midi_ch = midi_ch;
+    voices[oldest].note = note;
+    voices[oldest].age = ++voice_clock;
+    return oldest;
+}
+
+static void voice_release(int midi_ch, int note)
+{
+    int i;
+    for (i = 0; i < 9; i++) {
+        if (voices[i].used && voices[i].midi_ch == midi_ch && voices[i].note == note) {
+            opl_keyoff(i);
+            voices[i].used = 0;
+            return;
+        }
+    }
+}
+
+static void voices_all_off(void)
+{
+    int i;
+    for (i = 0; i < 9; i++) {
+        if (voices[i].used) { opl_keyoff(i); voices[i].used = 0; }
+    }
+}
+
+// -------------------------------------------------------------- MUS events
+
+// MUS percussion is channel 15; a note there selects a GENMIDI percussion
+// instrument (indices 128..174 for notes 35..81).
+static int channel_instrument(int midi_ch, int note)
+{
+    if (midi_ch == 15) {
+        int idx = 128 + note - 35;
+        if (idx < 128) idx = 128;
+        if (idx >= GENMIDI_NUM) idx = GENMIDI_NUM - 1;
+        return idx;
+    }
+    return chans[midi_ch].instrument;
+}
+
+static void mus_play_note(int midi_ch, int note, int vol)
+{
+    if (vol >= 0)
+        chans[midi_ch].volume = vol;
+
+    int instr_idx = channel_instrument(midi_ch, note);
+    const u8 *instr = instr_ptr(instr_idx);
+    const u8 *voice = instr_voice(instr);
+
+    // Fixed-pitch instruments (most percussion) play at their fixed note.
+    int play_note = note;
+    unsigned short flags = (unsigned short)(instr[0] | (instr[1] << 8));
+    if (flags & GENMIDI_FLAG_FIXED)
+        play_note = instr[3];
+    if (play_note < 0)   play_note = 0;
+    if (play_note > 95)  play_note = 95;
+
+    int v = voice_alloc(midi_ch, note);
+    opl_program_voice(v, voice);
+    opl_set_level(v, voice, midi_ch);
+    opl_keyon(v, play_note);
+}
+
+// Process one group of simultaneous events, then set the delay to the next.
+static void mus_advance_group(void)
+{
+    int guard = 2048;                            // safety: never spin on a malformed score
+    for (;;) {
+        if (--guard <= 0) { mus_delay = 1; return; }
+        if (mus_pos >= mus_end) {
+            if (mus_looping) { mus_pos = mus_loop; voices_all_off(); }
+            else             { mus_playing = 0; voices_all_off(); return; }
+        }
+
+        u8 ev   = *mus_pos++;
+        int last = ev & 0x80;
+        int type = (ev >> 4) & 7;
+        int ch   = ev & 0x0F;
+
+        switch (type) {
+        case 0:                                  // release note
+            voice_release(ch, *mus_pos++ & 0x7F);
+            break;
+        case 1: {                                // play note (+ optional volume)
+            u8 n = *mus_pos++;
+            int vol = -1;
+            if (n & 0x80) vol = *mus_pos++ & 0x7F;
+            mus_play_note(ch, n & 0x7F, vol);
+            break;
+        }
+        case 2:                                  // pitch bend (consume; not applied yet)
+            mus_pos++;
+            break;
+        case 3:                                  // system event
+            if ((*mus_pos++ & 0x7F) >= 10)       // all-notes/sounds-off family
+                voices_all_off();
+            break;
+        case 4: {                                // controller change
+            u8 ctl = *mus_pos++;
+            u8 val = *mus_pos++;
+            if (ctl == 0)      chans[ch].instrument = val;        // program
+            else if (ctl == 3) chans[ch].volume = val & 0x7F;     // volume
+            break;
+        }
+        case 6:                                  // score end
+            if (mus_looping) { mus_pos = mus_loop; voices_all_off(); }
+            else             { mus_playing = 0; voices_all_off(); return; }
+            break;
+        default:                                 // 5 = measure end, 7 = unused
+            break;
+        }
+
+        if (last) {                              // variable-length delay follows
+            int d = 0; u8 b;
+            do { b = *mus_pos++; d = (d << 7) | (b & 0x7F); } while (b & 0x80);
+            mus_delay = d;
+            return;
+        }
+    }
+}
+
+// ------------------------------------------------------------------ public API
+
+// Called once per game loop (from D_DoomLoop). Advances the score by the game
+// clock (I_GetTime, 35 Hz), 4 MUS ticks per game tic.
+void I_UpdateMusic(void)
+{
+    int now, dt, ticks;
+
+    if (opl_fd < 0 || !mus_playing || mus_paused) {
+        last_gametic = -1;
+        return;
+    }
+
+    now = I_GetTime();
+    if (last_gametic < 0) { last_gametic = now; return; }   // establish baseline
+
+    dt = now - last_gametic;
+    last_gametic = now;
+    if (dt < 0)  dt = 0;
+    if (dt > 35) dt = 35;                                    // clamp a long stall to ~1 s
+
+    ticks = dt * MUS_TICKS_PER_GAMETIC;
+    while (ticks-- > 0 && mus_playing) {
+        if (mus_delay > 0) { mus_delay--; continue; }
+        mus_advance_group();
+    }
+}
+
+void I_InitMusic(void)
+{
+    int i;
+
+    opl_fd = open("/dev/opl", O_WRONLY);
+    if (opl_fd < 0) {
+        printf("I_InitMusic: /dev/opl unavailable; music disabled\n");
+        return;
+    }
+
+    if (W_CheckNumForName("GENMIDI") < 0) {
+        printf("I_InitMusic: no GENMIDI lump; music disabled\n");
+        close(opl_fd);
+        opl_fd = -1;
+        return;
+    }
+    genmidi = (const u8 *)W_CacheLumpName("GENMIDI", PU_STATIC) + 8;  // skip header
+
+    // Reset the chip: OPL3 mode on, no rhythm, all voices silent.
+    opl(0x105, 0x01);              // OPL3 NEW = 1 (enables the L/R bits we set)
+    opl(0x08, 0x00);
+    opl(0xBD, 0x00);
+    for (i = 0; i < 9; i++) {
+        opl(0xA0 + i, 0x00);
+        opl(0xB0 + i, 0x00);       // key off, block 0
+        voices[i].used = 0;
+    }
+    for (i = 0; i < 16; i++) {
+        chans[i].instrument = 0;
+        chans[i].volume = 100;
+    }
+
+    printf("I_InitMusic: OPL music ready (/dev/opl, GENMIDI %d instruments)\n", GENMIDI_NUM);
+}
+
+int I_RegisterSong(void *data, const char *name)
+{
+    const u8 *d = (const u8 *)data;
+
+    if (opl_fd < 0 || !data)
+        return 0;
+
+    // MUS header: "MUS\x1a", u16 SongLen, u16 SongStart, ...
+    if (!(d[0] == 'M' && d[1] == 'U' && d[2] == 'S' && d[3] == 0x1A))
+        return 0;                                  // not MUS (e.g. raw MIDI) — unsupported
+
+    int song_len   = d[4] | (d[5] << 8);
+    int song_start = d[6] | (d[7] << 8);
+
+    song_base = d;
+    mus_loop  = d + song_start;
+    mus_end   = d + song_start + song_len;
+    mus_pos   = mus_loop;
+    mus_delay = 0;
+    mus_playing = 0;
+    mus_paused = 0;
+    return 1;
+}
+
+void I_PlaySong(int handle, int looping)
+{
+    if (opl_fd < 0 || !handle)
+        return;
+    int i;
+    for (i = 0; i < 16; i++) chans[i].volume = 100;
+    voices_all_off();
+    mus_pos = mus_loop;
+    mus_delay = 0;
+    mus_looping = looping;
+    mus_paused = 0;
+    mus_playing = 1;
+    last_gametic = -1;
+}
+
+void I_StopSong(int handle)
+{
+    mus_playing = 0;
+    voices_all_off();
+}
+
+void I_PauseSong(int handle)
+{
+    mus_paused = 1;
+    voices_all_off();
+}
+
+void I_ResumeSong(int handle)
+{
+    mus_paused = 0;
+}
+
+void I_UnRegisterSong(int handle)
+{
+    mus_playing = 0;
+    voices_all_off();
+    song_base = mus_pos = mus_end = mus_loop = NULL;
+}
+
+void I_SetMusicVolume(int volume)
+{
+    music_volume = volume;               // 0..15
+    if (music_volume < 0)  music_volume = 0;
+    if (music_volume > 15) music_volume = 15;
+}
+
+void I_ShutdownMusic(void)
+{
+    if (opl_fd >= 0) {
+        mus_playing = 0;
+        voices_all_off();
+        close(opl_fd);
+        opl_fd = -1;
+    }
+}

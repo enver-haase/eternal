@@ -404,6 +404,8 @@ void D_DoomLoop (void)
 	// it back at native speed (Layer 1/2).
 	I_UpdateSound();
 	I_SubmitSound();
+	// Advance the OPL music sequencer (writes registers to /dev/opl).
+	I_UpdateMusic();
     }
 }
 
