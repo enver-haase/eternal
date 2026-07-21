@@ -1228,15 +1228,20 @@ R_DrawColumn:
 .Ldc_c_0x10000: .word 0x10000
 .Ldc_cn_stride: .word -(320*4)     /* -SCREENWIDTH*4 = -1280 */
 
-/* Scratch storage for values across runtime calls */
-.Ldc_save_count:    .word 0
-.Ldc_save_frac:     .word 0
-
-/* Pre-negated loop constants (filled during setup epilogue) */
-.Ldc_ns:    .word 0    /* -dc_source        */
-.Ldc_nc:    .word 0    /* -dc_colormap      */
-.Ldc_nsl:   .word 0    /* -step_lo          */
-.Ldc_nsi:   .word 0    /* -(4*step_int)     */
+/* Scratch storage + pre-negated loop cells — these are WRITTEN at runtime (used as
+ * subleq B operands), so under the MMU port they must NOT live in the read-only
+ * (R+X) .text section: every subleq op stores M[B], so a write here would fault on
+ * write-protected .text. Moved to .bss (writable, demand-zeroed). Read-only
+ * constants and link-time address literals stay in .text (only ever read as A). */
+        .bss
+        .p2align 2
+.Ldc_save_count:    .zero 4
+.Ldc_save_frac:     .zero 4
+.Ldc_ns:    .zero 4    /* -dc_source        */
+.Ldc_nc:    .zero 4    /* -dc_colormap      */
+.Ldc_nsl:   .zero 4    /* -step_lo          */
+.Ldc_nsi:   .zero 4    /* -(4*step_int)     */
+        .text
 
 /* Negated return address constants */
 .Ldc_mul1_ret_neg:  .word -.Ldc_mul1_ret
@@ -2053,25 +2058,28 @@ R_DrawSpan:
 .Lds_c_0xFFFF:  .word 0xFFFF
 .Lds_c_0x10000: .word 0x10000
 
-/* Scratch storage for values across runtime calls */
-.Lds_save_count:    .word 0
-.Lds_save_dest:     .word 0
-.Lds_save_x_int:    .word 0
-.Lds_save_x_lo:     .word 0
-.Lds_save_xsi:      .word 0
-.Lds_save_xsl:      .word 0
-.Lds_save_y_int:    .word 0
-.Lds_save_y_lo:     .word 0
-.Lds_save_ysi:      .word 0
-.Lds_save_ysl:      .word 0
-
-/* Pre-negated loop constants (filled during setup epilogue) */
-.Lds_ns:    .word 0    /* -ds_source          */
-.Lds_nc:    .word 0    /* -ds_colormap        */
-.Lds_nxsl:  .word 0    /* -xstep_lo           */
-.Lds_nysl:  .word 0    /* -ystep_lo           */
-.Lds_nxsi:  .word 0    /* -(4*xstep_int)      */
-.Lds_nys:   .word 0    /* -(4*ystep_scaled)   */
+/* WRITABLE scratch + pre-negated loop cells (written as subleq B operands at
+ * runtime) — moved to .bss so they are never stored to in the write-protected
+ * (R+X) .text under the MMU port. See the R_DrawColumn note above. */
+        .bss
+        .p2align 2
+.Lds_save_count:    .zero 4
+.Lds_save_dest:     .zero 4
+.Lds_save_x_int:    .zero 4
+.Lds_save_x_lo:     .zero 4
+.Lds_save_xsi:      .zero 4
+.Lds_save_xsl:      .zero 4
+.Lds_save_y_int:    .zero 4
+.Lds_save_y_lo:     .zero 4
+.Lds_save_ysi:      .zero 4
+.Lds_save_ysl:      .zero 4
+.Lds_ns:    .zero 4    /* -ds_source          */
+.Lds_nc:    .zero 4    /* -ds_colormap        */
+.Lds_nxsl:  .zero 4    /* -xstep_lo           */
+.Lds_nysl:  .zero 4    /* -ystep_lo           */
+.Lds_nxsi:  .zero 4    /* -(4*xstep_int)      */
+.Lds_nys:   .zero 4    /* -(4*ystep_scaled)   */
+        .text
 
 /* Negated return address constants */
 .Lds_sra1_ret_neg:  .word -.Lds_sra1_ret
