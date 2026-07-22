@@ -71,6 +71,15 @@ if [ "$FROM" -le 3 ]; then
   run make -C "$ROOT/uclibc-ng" ARCH=subleq CROSS_COMPILE="" CC="$CLANG" HOSTCC=gcc \
       KERNEL_HEADERS="$SYS/kernel-headers/include" PREFIX="$SYS" install
   run "$ROOT/uclibc-ng/postprocess_sysroot.sh" "$SYS"
+  # Force-reassemble the C-runtime startup objects from source and install them. uClibc's
+  # make can leave a STALE crt1.o (older than crt1.S) — and crt1.o is the userspace _start;
+  # a stale/mis-toolchained one makes every binary read a wild pointer at launch and die
+  # (the §7 "self-compiled userspace never ran" bug). Rebuilding here guarantees a fresh
+  # _start built with THIS arch's toolchain.
+  for c in crt1 crti crtn; do
+    csrc="$ROOT/uclibc-ng/libc/sysdeps/linux/subleq/$c.S"
+    [ -f "$csrc" ] && { run "$CLANG" -c "$csrc" -o "$SYS/lib/$c.o"; }
+  done
 fi
 
 # ---- step 4: core / soft-float / libc++abi runtime (honors SUBLEQ_TOOLCHAIN/SYSROOT/LINUX)
@@ -94,6 +103,30 @@ if [ "$FROM" -le 6 ]; then
   run cp "$ROOT/busybox/busybox" "$ROOT/busybox/initramfs_root/bin/busybox"
 fi
 
+# ---- step 6.5: fbdoom (optional; WITH_DOOM=1). Build DOOM from source against the fresh
+#      REG_BASE-correct sysroot, install it + its WAD into the initramfs, and swap in a DOOM
+#      launcher /init. Must run AFTER the sysroot runtime (step 4) so doom links page-0 regs.
+if [ "$FROM" -le 6 ] && [ -n "$WITH_DOOM" ]; then
+  log "STEP 6.5  fbdoom (build from source + initramfs)"
+  run make -C "$ROOT/doom" clean
+  run make -C "$ROOT/doom" CC="$CLANG" MC="$TC/bin/llvm-mc" -j"$(nproc)"
+  run mkdir -p "$ROOT/initramfs_root/root/doom"
+  run cp "$ROOT/doom/doom" "$ROOT/initramfs_root/root/doom/doom"
+  run cp "$ROOT/doom/doom1.wad" "$ROOT/initramfs_root/root/doom/doom1.wad"
+  run chmod +x "$ROOT/initramfs_root/root/doom/doom"
+  cat > "$ROOT/initramfs_root/init" <<'SH'
+#!/bin/sh
+/bin/busybox mount -t devtmpfs none /dev
+/bin/busybox mount -t proc     none /proc
+/bin/busybox mount -t sysfs    none /sys
+cd /root/doom
+echo "lunatix: launching fbdoom..." > /dev/console
+./doom < /dev/tty0 > /dev/console 2>&1
+exec /bin/sh
+SH
+  run chmod +x "$ROOT/initramfs_root/init"
+fi
+
 # ---- step 7: kernel (NOMMU: CONFIG_MMU unset via defconfig) -> linux/vmlinux
 if [ "$FROM" -le 7 ]; then
   log "STEP 7  kernel mrproper + defconfig + build"
@@ -107,6 +140,14 @@ if [ "$FROM" -le 7 ]; then
   # mrproper also removes the runtime libs copied in by STEP 4; restore them.
   run "$ROOT/runtime/build_and_install_runtime.sh"
   run make -C "$ROOT/linux" "${K[@]}" defconfig
+  # DEBUG_CONSOLE=1: route the console to ttyS0 (which writes via __subleq_putchar -> host
+  # stdout) and keep the boot console, so kernel AND userspace output are visible headless
+  # (default console=tty0 goes to the framebuffer, hiding userspace + any exec/panic).
+  if [ -n "$DEBUG_CONSOLE" ]; then
+    run "$ROOT/linux/scripts/config" --file "$ROOT/linux/.config" \
+        --set-str CONFIG_CMDLINE "console=ttyS0 keep_bootcon loglevel=8"
+    run make -C "$ROOT/linux" "${K[@]}" olddefconfig
+  fi
   run make -C "$ROOT/linux" "${K[@]}" -j"$(nproc)"
 fi
 
