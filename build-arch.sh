@@ -97,10 +97,29 @@ fi
 
 # ---- step 6: BusyBox (its .config is in-tree; force the NOMMU toolchain)
 if [ "$FROM" -le 6 ]; then
-  log "STEP 6  BusyBox"
+  log "STEP 6  BusyBox (static)"
+  # Link BusyBox statically: dynamic linking (ld-uClibc + libc.so) does not yet work in the
+  # self-built NOMMU userspace (busybox dies at dynamic startup), but -static produces a
+  # working self-relocating static-PIE (same path as the static crt test + the doom binary).
+  # CONFIG_STATIC=y avoids needing libc.so/ld-uClibc at all.
+  # Linkage: DYNAMIC by default (matches upstream — the kernel resolves NEEDED libs +
+  # runtime symbols at load, there is no userspace ld.so). BUSYBOX_STATIC=1 forces a
+  # self-contained static-PIE (a fallback if kernel-side dynamic linking regresses).
+  if [ -n "$BUSYBOX_STATIC" ]; then
+    sed -i 's/^# CONFIG_STATIC is not set/CONFIG_STATIC=y/' "$ROOT/busybox/.config"
+    grep -q '^CONFIG_EXTRA_LDFLAGS=.*-static' "$ROOT/busybox/.config" || \
+      sed -i 's#^CONFIG_EXTRA_LDFLAGS="#CONFIG_EXTRA_LDFLAGS="-static #' "$ROOT/busybox/.config"
+  else
+    sed -i 's/^CONFIG_STATIC=y/# CONFIG_STATIC is not set/' "$ROOT/busybox/.config"
+    sed -i 's#^CONFIG_EXTRA_LDFLAGS="-static #CONFIG_EXTRA_LDFLAGS="#' "$ROOT/busybox/.config"
+  fi
+  run make -C "$ROOT/busybox" CC="$CLANG" HOSTCC=cc oldconfig
   run make -C "$ROOT/busybox" CC="$CLANG" HOSTCC=cc \
       AR="$TC/bin/llvm-ar" STRIP="$TC/bin/llvm-strip" SKIP_STRIP=y -j"$(nproc)"
-  run cp "$ROOT/busybox/busybox" "$ROOT/busybox/initramfs_root/bin/busybox"
+  # Install into the kernel's initramfs (CONFIG_INITRAMFS_SOURCE=../initramfs_root), NOT
+  # busybox/initramfs_root (which doesn't exist — the old path silently failed, baking a
+  # stale busybox).
+  run cp "$ROOT/busybox/busybox" "$ROOT/initramfs_root/bin/busybox"
 fi
 
 # ---- step 6.5: fbdoom (optional; WITH_DOOM=1). Build DOOM from source against the fresh
