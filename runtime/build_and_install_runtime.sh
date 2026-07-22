@@ -13,17 +13,19 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR/.."
-BUILD="$PROJECT_ROOT/llvm-project/build/bin"
+# Toolchain + sysroot are per-arch: override with SUBLEQ_TOOLCHAIN (the llvm build
+# dir, containing bin/ + lib/) and SUBLEQ_SYSROOT. Defaults keep the legacy layout.
+BUILD="${SUBLEQ_TOOLCHAIN:-$PROJECT_ROOT/llvm-project/build}/bin"
 CLANG="$BUILD/clang"
 CLANGPP="$BUILD/clang++"
 MC="$BUILD/llvm-mc"
 AR="$BUILD/llvm-ar"
 
 # Sysroot path
-SYSROOT="$PROJECT_ROOT/runtime/sysroot"
+SYSROOT="${SUBLEQ_SYSROOT:-$PROJECT_ROOT/runtime/sysroot}"
 
-# Linux kernel path
-LINUX_LIB="$PROJECT_ROOT/linux/arch/subleq/lib"
+# Linux kernel path (per-arch kernel tree; override with SUBLEQ_LINUX)
+LINUX_LIB="${SUBLEQ_LINUX:-$PROJECT_ROOT/linux}/arch/subleq/lib"
 
 echo "=== Subleq Runtime Build and Install ==="
 echo ""

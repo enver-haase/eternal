@@ -15,8 +15,10 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR/.."
 BUILD_DIR="$SCRIPT_DIR/libcxx"
-TOOLCHAIN="$PROJECT_ROOT/llvm-project/build/bin"
-SYSROOT="$PROJECT_ROOT/runtime/sysroot"
+# Per-arch: SUBLEQ_TOOLCHAIN = llvm build dir (bin/ + lib/cmake), SUBLEQ_SYSROOT = sysroot.
+LLVM_BUILD="${SUBLEQ_TOOLCHAIN:-$PROJECT_ROOT/llvm-project/build}"
+TOOLCHAIN="$LLVM_BUILD/bin"
+SYSROOT="${SUBLEQ_SYSROOT:-$PROJECT_ROOT/runtime/sysroot}"
 
 # Verify prerequisites
 if [ ! -x "$TOOLCHAIN/clang" ]; then
@@ -59,8 +61,8 @@ cmake -G Ninja \
     -DCMAKE_SYSROOT="$SYSROOT" \
     -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
     \
-    -DLLVM_DIR="$PROJECT_ROOT/llvm-project/build/lib/cmake/llvm" \
-    -DClang_DIR="$PROJECT_ROOT/llvm-project/build/lib/cmake/clang" \
+    -DLLVM_DIR="$LLVM_BUILD/lib/cmake/llvm" \
+    -DClang_DIR="$LLVM_BUILD/lib/cmake/clang" \
     -DLLVM_DEFAULT_TARGET_TRIPLE=subleq-unknown-linux \
     -DLLVM_USE_LINKER=lld \
     \

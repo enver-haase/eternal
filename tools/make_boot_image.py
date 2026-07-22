@@ -39,7 +39,7 @@ LLVM_BIN = os.path.join(PROJECT_ROOT, "llvm-project", "build", "bin")
 REG_BASE = 1024
 
 
-def create_boot_sequence(text_start, stack_size, main_offset=0):
+def create_boot_sequence(text_start, stack_size, main_offset=0, reg_base=REG_BASE):
     """Create the boot sequence based on text_start.
 
     With REG_BASE=1024 the boot area is pages 0+1: page 0 = bootstrap + VM I/O +
@@ -69,10 +69,10 @@ def create_boot_sequence(text_start, stack_size, main_offset=0):
     boot[6] = 0x17F9C000
 
     # ESI register-file cells at their (relocated) homes.
-    boot[4 + REG_BASE]  = stack_size  # SP init value (stack top)
-    boot[36 + REG_BASE] = 0           # ZERO constant
-    boot[38 + REG_BASE] = -1          # MINUS_ONE constant
-    boot[39 + REG_BASE] = 1           # ONE constant
+    boot[4 + reg_base]  = stack_size  # SP init value (stack top)
+    boot[36 + reg_base] = 0           # ZERO constant
+    boot[38 + reg_base] = -1          # MINUS_ONE constant
+    boot[39 + reg_base] = 1           # ONE constant
 
     # Last 3 words: jump to main. subleq(12,12,main): mem[word3]-=mem[word3]=0.
     boot[-3] = 12                      # A = byte addr 12 (word 3, =0 in boot area)
@@ -120,9 +120,13 @@ def main():
     parser = argparse.ArgumentParser(
         description='Create a bootable Subleq image from an ELF file')
     parser.add_argument('elf_file', help='Input ELF file')
-    parser.add_argument('--text-start', type=int, default=(4096 * (2 if REG_BASE else 1)),
-                        help='Byte address where code starts (default: 8192 for '
-                             'REG_BASE=1024 register-file-in-page-1, else 4096)')
+    parser.add_argument('--reg-base', type=int, default=REG_BASE, choices=[0, 1024],
+                        help='ESI register-file base in WORDS; MUST match the toolchain '
+                             'SUBLEQ_REG_BASE and kernel asm/subleq-regs.h (0 = cable/NOMMU '
+                             f'page 0, 1024 = MMU page 1). Default: {REG_BASE}')
+    parser.add_argument('--text-start', type=int, default=None,
+                        help='Byte address where code starts (default derived from '
+                             '--reg-base: 4096 for reg-base 0, 8192 for 1024)')
     parser.add_argument('--stack-size', type=int, default=0x800000,
                         help='Stack pointer initial value in bytes (default: 8MB)')
     parser.add_argument('--llvm-bin', type=str, default=LLVM_BIN,
@@ -130,7 +134,13 @@ def main():
     parser.add_argument('--output', '-o', type=str, default=None,
                         help='Output file (default: <elf_file>.bootimage)')
     args = parser.parse_args()
-    
+
+    # Derive the text-start default from the register base if not given: the kernel
+    # links at 0x1000 for reg-base 0 (code in page 1) and 0x2000 for reg-base 1024
+    # (code in page 2, above the relocated register file).
+    if args.text_start is None:
+        args.text_start = 4096 * (2 if args.reg_base else 1)
+
     # Determine output filename
     output_file = args.output if args.output else f"{args.elf_file}.bootimage"
     
@@ -171,7 +181,7 @@ def main():
             code = f.read()
         
         # Create boot sequence
-        boot = create_boot_sequence(args.text_start, args.stack_size, entry_offset)
+        boot = create_boot_sequence(args.text_start, args.stack_size, entry_offset, args.reg_base)
         
         # Write output: boot sequence + code
         with open(output_file, 'wb') as f:
