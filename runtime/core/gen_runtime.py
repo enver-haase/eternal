@@ -31,7 +31,12 @@ Individual runtime functions are in separate files:
 #   1024 = register file relocated to page 1 (page 0 reserved for I/O + vectors).
 # Only the register cells below carry the base; the constant pool, INDIRECT_FLAG
 # and ADDR_SPECIAL are NOT part of the register file and are not offset.
-REG_BASE = 1024
+# Overridable per-arch via the SUBLEQ_REG_BASE env var (plan §3 single source of truth):
+# cable-NOMMU builds MUST pass 0, or the kernel-resident runtime emits page-1 register
+# operands that a REG_BASE=0 kernel/toolchain can't reach -> the kernel halts on its first
+# arithmetic. Default 1024 keeps the MMU arch unchanged.
+import os
+REG_BASE = int(os.environ.get("SUBLEQ_REG_BASE", "1024"))
 ADDR_Z = (3 + REG_BASE) * 4        # word 3
 ADDR_SP = (4 + REG_BASE) * 4       # word 4
 ADDR_RA = (5 + REG_BASE) * 4       # word 5
