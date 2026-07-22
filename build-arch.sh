@@ -26,7 +26,7 @@ case "$ARCH" in
     # (SUBLEQ_REG_BASE_DEFAULT) is only for the MMU arch (REG_BASE=1024).
     TC="$ROOT/llvm-project/build-nommu-clean"  # bb79724, pure upstream, REG_BASE=0
     REGBASE=0
-    LINUX_REF="c06286b"                     # pure Cable upstream (plan §4); boots once gen_runtime REG_BASE=0
+    LINUX_REF="51a994c5c390"                 # c06286b + userspace-exec fixes (put_user, ELF_HWCAP); c06286b scrambles create_elf_tables -> doom crashes
     ;;
   *) echo "unknown arch '$ARCH' (only cable-nommu supported here)"; exit 2;;
 esac
@@ -127,6 +127,14 @@ fi
 #      launcher /init. Must run AFTER the sysroot runtime (step 4) so doom links page-0 regs.
 if [ "$FROM" -le 6 ] && [ -n "$WITH_DOOM" ]; then
   log "STEP 6.5  fbdoom (build from source + initramfs)"
+  # doom_asm.S is arch-specific: the MMU commit 8367ddf moved R_DrawColumn/R_DrawSpan
+  # draw-scratch from .text to .bss (needed because MMU makes .text read-only). On NOMMU
+  # .text is writable and that .bss move corrupts memory near the visplane arrays -> doom
+  # crashes in R_InitPlanes. cable-NOMMU must use the upstream (pre-MMU) doom_asm.S where
+  # the scratch lives in .text.
+  if [ "$REGBASE" = 0 ]; then
+    run git -C "$ROOT/doom" checkout 511dffb -- src/doom_asm.S
+  fi
   run make -C "$ROOT/doom" clean
   run make -C "$ROOT/doom" CC="$CLANG" MC="$TC/bin/llvm-mc" -j"$(nproc)"
   run mkdir -p "$ROOT/initramfs_root/root/doom"

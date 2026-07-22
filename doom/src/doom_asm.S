@@ -15,38 +15,33 @@
 
         .text
 
-/* ---- Register addresses ----
- * MMU port relocated the ESI register file from page 0 to page 1
- * (REG_BASE = 1024 words = 4096 bytes). These hand-written operands must carry
- * that offset or they hit page 0 (the NULL guard) and fault under MMU. Matches
- * the kernel's asm/subleq-regs.h REG_BASE. INDIRECT is a flag, not an address. */
-.set REG_BASE, 4096
-.set REG_Z,   REG_BASE+12
-.set REG_SP,  REG_BASE+16
-.set REG_RA,  REG_BASE+20
-.set REG_R20, REG_BASE+96
-.set REG_R21, REG_BASE+100
-.set REG_R22, REG_BASE+104
-.set REG_R23, REG_BASE+108
-.set REG_R24, REG_BASE+112
-.set ZERO,    REG_BASE+144
-.set REG_T0,  REG_BASE+160
-.set REG_T1,  REG_BASE+164
-.set REG_T2,  REG_BASE+168
-.set REG_T3,  REG_BASE+172
-.set REG_T4,  REG_BASE+176
-.set REG_T5,  REG_BASE+180
-.set REG_T6,  REG_BASE+184
-.set REG_T7,  REG_BASE+188
-.set REG_T8,  REG_BASE+192
-.set REG_T9,  REG_BASE+196
-.set REG_T10, REG_BASE+200
-.set REG_T11, REG_BASE+204
-.set REG_T12, REG_BASE+208
-.set REG_T13, REG_BASE+212
-.set REG_T14, REG_BASE+216
-.set REG_T15, REG_BASE+220
-.set REG_R31, REG_BASE+140
+/* ---- Register addresses ---- */
+.set REG_Z,   12
+.set REG_SP,  16
+.set REG_RA,  20
+.set REG_R20, 96
+.set REG_R21, 100
+.set REG_R22, 104
+.set REG_R23, 108
+.set REG_R24, 112
+.set ZERO,    144
+.set REG_T0,  160
+.set REG_T1,  164
+.set REG_T2,  168
+.set REG_T3,  172
+.set REG_T4,  176
+.set REG_T5,  180
+.set REG_T6,  184
+.set REG_T7,  188
+.set REG_T8,  192
+.set REG_T9,  196
+.set REG_T10, 200
+.set REG_T11, 204
+.set REG_T12, 208
+.set REG_T13, 212
+.set REG_T14, 216
+.set REG_T15, 220
+.set REG_R31, 140
 .set INDIRECT, 1
 
 /*===========================================================================
@@ -1228,20 +1223,15 @@ R_DrawColumn:
 .Ldc_c_0x10000: .word 0x10000
 .Ldc_cn_stride: .word -(320*4)     /* -SCREENWIDTH*4 = -1280 */
 
-/* Scratch storage + pre-negated loop cells — these are WRITTEN at runtime (used as
- * subleq B operands), so under the MMU port they must NOT live in the read-only
- * (R+X) .text section: every subleq op stores M[B], so a write here would fault on
- * write-protected .text. Moved to .bss (writable, demand-zeroed). Read-only
- * constants and link-time address literals stay in .text (only ever read as A). */
-        .bss
-        .p2align 2
-.Ldc_save_count:    .zero 4
-.Ldc_save_frac:     .zero 4
-.Ldc_ns:    .zero 4    /* -dc_source        */
-.Ldc_nc:    .zero 4    /* -dc_colormap      */
-.Ldc_nsl:   .zero 4    /* -step_lo          */
-.Ldc_nsi:   .zero 4    /* -(4*step_int)     */
-        .text
+/* Scratch storage for values across runtime calls */
+.Ldc_save_count:    .word 0
+.Ldc_save_frac:     .word 0
+
+/* Pre-negated loop constants (filled during setup epilogue) */
+.Ldc_ns:    .word 0    /* -dc_source        */
+.Ldc_nc:    .word 0    /* -dc_colormap      */
+.Ldc_nsl:   .word 0    /* -step_lo          */
+.Ldc_nsi:   .word 0    /* -(4*step_int)     */
 
 /* Negated return address constants */
 .Ldc_mul1_ret_neg:  .word -.Ldc_mul1_ret
@@ -2058,28 +2048,25 @@ R_DrawSpan:
 .Lds_c_0xFFFF:  .word 0xFFFF
 .Lds_c_0x10000: .word 0x10000
 
-/* WRITABLE scratch + pre-negated loop cells (written as subleq B operands at
- * runtime) — moved to .bss so they are never stored to in the write-protected
- * (R+X) .text under the MMU port. See the R_DrawColumn note above. */
-        .bss
-        .p2align 2
-.Lds_save_count:    .zero 4
-.Lds_save_dest:     .zero 4
-.Lds_save_x_int:    .zero 4
-.Lds_save_x_lo:     .zero 4
-.Lds_save_xsi:      .zero 4
-.Lds_save_xsl:      .zero 4
-.Lds_save_y_int:    .zero 4
-.Lds_save_y_lo:     .zero 4
-.Lds_save_ysi:      .zero 4
-.Lds_save_ysl:      .zero 4
-.Lds_ns:    .zero 4    /* -ds_source          */
-.Lds_nc:    .zero 4    /* -ds_colormap        */
-.Lds_nxsl:  .zero 4    /* -xstep_lo           */
-.Lds_nysl:  .zero 4    /* -ystep_lo           */
-.Lds_nxsi:  .zero 4    /* -(4*xstep_int)      */
-.Lds_nys:   .zero 4    /* -(4*ystep_scaled)   */
-        .text
+/* Scratch storage for values across runtime calls */
+.Lds_save_count:    .word 0
+.Lds_save_dest:     .word 0
+.Lds_save_x_int:    .word 0
+.Lds_save_x_lo:     .word 0
+.Lds_save_xsi:      .word 0
+.Lds_save_xsl:      .word 0
+.Lds_save_y_int:    .word 0
+.Lds_save_y_lo:     .word 0
+.Lds_save_ysi:      .word 0
+.Lds_save_ysl:      .word 0
+
+/* Pre-negated loop constants (filled during setup epilogue) */
+.Lds_ns:    .word 0    /* -ds_source          */
+.Lds_nc:    .word 0    /* -ds_colormap        */
+.Lds_nxsl:  .word 0    /* -xstep_lo           */
+.Lds_nysl:  .word 0    /* -ystep_lo           */
+.Lds_nxsi:  .word 0    /* -(4*xstep_int)      */
+.Lds_nys:   .word 0    /* -(4*ystep_scaled)   */
 
 /* Negated return address constants */
 .Lds_sra1_ret_neg:  .word -.Lds_sra1_ret
