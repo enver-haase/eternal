@@ -27,13 +27,36 @@ case "$ARCH" in
     TC="$ROOT/llvm-project/build-nommu-clean"  # bb79724, pure upstream, REG_BASE=0
     REGBASE=0
     LINUX_REF="51a994c5c390"                 # c06286b + userspace-exec fixes (put_user, ELF_HWCAP); c06286b scrambles create_elf_tables -> doom crashes
+    UCLIBC_REF="073fbd989"                    # cable-upstream uClibc: page-0 crt, direct-call syscall
     ;;
-  *) echo "unknown arch '$ARCH' (only cable-nommu supported here)"; exit 2;;
+  mmu)
+    # MMU ("protected mode"): REG_BASE=1024 (register file on page 1), DYNAMIC (ET_DYN)
+    # userspace, paging + NULL guard. Uses the 5660584 toolchain (enver-haase fork, REG_BASE=1024)
+    # — the one that built the confirmed-rendering MMU-DOOM-sound image (~/vmlinux.mmu-sound.bootimage).
+    # NB: the c591009/build-mmu toolchain (static ET_EXEC) REGRESSES doom codegen (M_CheckParm
+    # returns to a bad RA) and must NOT be used for MMU. Kernel = lunatix-mmu with CONFIG_MMU=y
+    # forced (its defconfig is actually NOMMU). MMU images are lunavm-only (CableVM has no MMU).
+    TC="$ROOT/llvm-project/build"              # 5660584 (enver-haase), REG_BASE=1024, dynamic doom
+    REGBASE=1024
+    LINUX_REF="lunatix-mmu"
+    UCLIBC_REF="lunatix-mmu"                   # MMU uClibc (1dc68ffce): page-1 crt regs + syscall-gate stub
+    MMU=1
+    ;;
+  *) echo "unknown arch '$ARCH' (supported: cable-nommu, mmu)"; exit 2;;
 esac
 
 # Toolchain override (diagnostics): e.g. LUNATIX_TC_OVERRIDE=.../build-nommu-clean to build
 # with the pre-c591009 (bb79724) REG_BASE=0 toolchain instead of the default option build.
 [ -n "$LUNATIX_TC_OVERRIDE" ] && TC="$LUNATIX_TC_OVERRIDE"
+
+# WITH_SOUND=1: use the sound-enabled kernel (nommu-sound-v2 = 51a994 + the /dev/dsp + /dev/opl
+# driver, NOMMU, CONFIG_SUBLEQ_SOUND=y). The doom userspace already links the sound backend
+# (device/i_snd_sound.c + i_snd_music.c); it just needs the kernel to expose the devices. The
+# sound MMIO regs are top-of-space sentinels the lunavm sound card intercepts (stock CableVM
+# has no sound card, so sound is lunavm-only until §8 moves the regs to the zero page).
+if [ -n "$WITH_SOUND" ] && [ "$ARCH" = cable-nommu ]; then
+  LINUX_REF="nommu-sound-v2"
+fi
 
 SYS="$ROOT/runtime/sysroot"                   # rebuilt wholesale by this run -> clean NOMMU sysroot
 CLANG="$TC/bin/clang"                         # default triple = subleq-unknown-linux
@@ -48,10 +71,14 @@ run(){ echo "+ $*"; "$@"; }
 "$CLANG" --version | grep -q "subleq-unknown-linux" || { echo "clang is not subleq-targeted"; exit 1; }
 log "build-arch $ARCH  toolchain=$TC  regbase=$REGBASE  sysroot=$SYS  from step $FROM"
 
-# ---- step 0: pin the kernel tree to the arch's reference commit (cable-nommu = pure c06286b)
-if [ "$FROM" -le 2 ]; then
-  log "STEP 0  pin linux -> $LINUX_REF"
-  run git -C "$ROOT/linux" checkout -q "$LINUX_REF"
+# ---- step 0: pin the kernel + uClibc trees to the arch's reference commits.
+# cable-NOMMU: pure upstream (page-0 crt, direct-call syscall). MMU: lunatix-mmu uClibc has
+# page-1 crt registers + the syscall-gate stub (commit 1dc68ffce) — without it a page-1 MMU
+# process reads page-0 registers (unmapped) and SIGSEGVs at _start.
+if [ "$FROM" -le 3 ]; then
+  log "STEP 0  pin linux -> $LINUX_REF ; uclibc -> $UCLIBC_REF"
+  [ "$FROM" -le 2 ] && run git -C "$ROOT/linux" checkout -q "$LINUX_REF"
+  run git -C "$ROOT/uclibc-ng" checkout -q "$UCLIBC_REF"
 fi
 
 # ---- step 2: kernel headers -> sysroot
@@ -66,10 +93,12 @@ fi
 # ---- step 3: uClibc-ng -> sysroot (dev headers + libs). NOMMU .config already in tree.
 if [ "$FROM" -le 3 ]; then
   log "STEP 3  uClibc-ng"
-  run make -C "$ROOT/uclibc-ng" ARCH=subleq CROSS_COMPILE="" CC="$CLANG" HOSTCC=gcc \
-      KERNEL_HEADERS="$SYS/kernel-headers/include" -j"$(nproc)"
-  run make -C "$ROOT/uclibc-ng" ARCH=subleq CROSS_COMPILE="" CC="$CLANG" HOSTCC=gcc \
-      KERNEL_HEADERS="$SYS/kernel-headers/include" PREFIX="$SYS" install
+  # STRIPTOOL must be the subleq-aware llvm-strip: the MMU uClibc strips objects, and the host
+  # `strip` can't read subleq ELF ("Unable to recognise the format") -> build fails.
+  UC=(ARCH=subleq CROSS_COMPILE="" CC="$CLANG" HOSTCC=gcc STRIPTOOL="$TC/bin/llvm-strip"
+      KERNEL_HEADERS="$SYS/kernel-headers/include")
+  run make -C "$ROOT/uclibc-ng" "${UC[@]}" -j"$(nproc)"
+  run make -C "$ROOT/uclibc-ng" "${UC[@]}" PREFIX="$SYS" install
   run "$ROOT/uclibc-ng/postprocess_sysroot.sh" "$SYS"
   # Force-reassemble the C-runtime startup objects from source and install them. uClibc's
   # make can leave a STALE crt1.o (older than crt1.S) — and crt1.o is the userspace _start;
@@ -102,10 +131,11 @@ if [ "$FROM" -le 6 ]; then
   # self-built NOMMU userspace (busybox dies at dynamic startup), but -static produces a
   # working self-relocating static-PIE (same path as the static crt test + the doom binary).
   # CONFIG_STATIC=y avoids needing libc.so/ld-uClibc at all.
-  # Linkage: DYNAMIC by default (matches upstream — the kernel resolves NEEDED libs +
-  # runtime symbols at load, there is no userspace ld.so). BUSYBOX_STATIC=1 forces a
-  # self-contained static-PIE (a fallback if kernel-side dynamic linking regresses).
-  if [ -n "$BUSYBOX_STATIC" ]; then
+  # Linkage: MMU is STATIC (the confirmed-rendering GOOD image is static ET_EXEC — its
+  # initramfs, extracted 2026-07-23, has NO ld-uClibc/libc.so; busybox+doom are static).
+  # cable-NOMMU is DYNAMIC by default (upstream: kernel resolves NEEDED libs at load).
+  # BUSYBOX_STATIC=1 forces static on NOMMU too (fallback if kernel dynamic linking regresses).
+  if [ -n "$BUSYBOX_STATIC" ] || [ -n "$MMU" ]; then
     sed -i 's/^# CONFIG_STATIC is not set/CONFIG_STATIC=y/' "$ROOT/busybox/.config"
     grep -q '^CONFIG_EXTRA_LDFLAGS=.*-static' "$ROOT/busybox/.config" || \
       sed -i 's#^CONFIG_EXTRA_LDFLAGS="#CONFIG_EXTRA_LDFLAGS="-static #' "$ROOT/busybox/.config"
@@ -133,8 +163,31 @@ if [ "$FROM" -le 6 ] && [ -n "$WITH_DOOM" ]; then
   # crashes in R_InitPlanes. cable-NOMMU must use the upstream (pre-MMU) doom_asm.S where
   # the scratch lives in .text.
   if [ "$REGBASE" = 0 ]; then
-    run git -C "$ROOT/doom" checkout 511dffb -- src/doom_asm.S
+    run git -C "$ROOT/doom" checkout 511dffb -- src/doom_asm.S       # NOMMU: scratch in writable .text
+  else
+    # MMU: .text is read-only under paging, so use the .bss-scratch doom_asm.S (commit 8367ddf,
+    # which lives in the nested doom/ layout). Extract it into this (flat) tree.
+    echo "+ install MMU (.bss) doom_asm.S from 8367ddf"
+    git -C "$ROOT/doom" show 8367ddf:doom/src/doom_asm.S > "$ROOT/doom/src/doom_asm.S"
   fi
+  # Linkage: MMU = STATIC ET_EXEC; NOMMU = DYNAMIC ET_DYN. GROUND TRUTH (2026-07-23): the
+  # confirmed-rendering GOOD MMU image (~/vmlinux.mmu-sound-doom.GOOD.bootimage) has a STATIC
+  # ET_EXEC doom (e_type=EXEC, 7.0MB) in a mmu_initramfs.txt cpio with no shared libs. The
+  # earlier "dynamic for both" note was wrong (it never rendered). The c591009 regression was
+  # a TOOLCHAIN issue, not staticness — static built by 5660584 (build/) renders fine.
+  if [ -n "$MMU" ]; then
+    grep -q '\-static -o doom' "$ROOT/doom/Makefile" || \
+      sed -i 's#-o doom \$(TARGET_OBJS)#-static -o doom $(TARGET_OBJS)#' "$ROOT/doom/Makefile"
+  else
+    sed -i 's#-static \(-static \)*-o doom \$(TARGET_OBJS)#-o doom $(TARGET_OBJS)#' "$ROOT/doom/Makefile"
+  fi
+  # THOROUGH clean: `make clean` leaves the 64 objects in doom/build/, so a subsequent build
+  # re-links whatever .o's are present — including STALE objects from a prior build with a
+  # DIFFERENT toolchain (e.g. build-nommu/2ba79ab). That produced a mixed-toolchain doom
+  # (bb79724 + 2ba79ab) that HANGS after I_InitSound (same "stale object" disease as the §7
+  # crt1.o bug). Remove all objects so every .o is compiled fresh by $CLANG -> uniform toolchain.
+  run rm -rf "$ROOT/doom/build"
+  run find "$ROOT/doom" -name '*.o' -delete
   run make -C "$ROOT/doom" clean
   run make -C "$ROOT/doom" CC="$CLANG" MC="$TC/bin/llvm-mc" -j"$(nproc)"
   run mkdir -p "$ROOT/initramfs_root/root/doom"
@@ -147,6 +200,19 @@ if [ "$FROM" -le 6 ] && [ -n "$WITH_DOOM" ]; then
 /bin/busybox mount -t proc     none /proc
 /bin/busybox mount -t sysfs    none /sys
 cd /root/doom
+# A WAD supplied by the VM host (Vaadoom: fetched by the browser) shows up as
+# /dev/wad, with the name it should be played under in /dev/wadname. DOOM's
+# IdentifyVersion() picks the game mode from that name, so link the device under
+# it and drop the bundled shareware WAD when the two differ. No copying: DOOM
+# reads the lumps straight off the device, and the host does those copies.
+WAD=`/bin/busybox cat /dev/wadname 2>/dev/null`
+if [ -n "$WAD" ]; then
+	if [ "$WAD" != doom1.wad ]; then
+		/bin/busybox rm -f doom1.wad
+	fi
+	/bin/busybox ln -sf /dev/wad "$WAD"
+	echo "lunatix: playing host WAD as $WAD" > /dev/console
+fi
 echo "lunatix: launching fbdoom..." > /dev/console
 ./doom < /dev/tty0 > /dev/console 2>&1
 exec /bin/sh
@@ -160,6 +226,10 @@ if [ "$FROM" -le 7 ]; then
   # LLVM= points every tool at the subleq toolchain; override the HOST tools back to the
   # system compiler so host-side kernel scripts still build.
   K=(ARCH=subleq LLVM="$TC/bin/" HOSTCC=gcc HOSTCXX=g++ HOSTLD=ld HOSTAR=ar)
+  # MMU links kernel text at page 2 (0x2000): page 0 = I/O/boot, page 1 = register file
+  # (REG_BASE=1024), kernel text above. Must match the packer's --reg-base 1024 text-start
+  # (0x2000). lunatix-mmu's Makefile defaults to 0x1000 (the NOMMU value), so override it.
+  [ -n "$MMU" ] && K+=(SUBLEQ_TEXT_START=0x2000)
   # A from-scratch build MUST start clean: this tree may have just been switched from
   # another branch (e.g. via STEP 0), and an incremental make would link stale objects
   # into a Frankenstein kernel that halts at boot. mrproper wipes all generated state.
@@ -167,6 +237,17 @@ if [ "$FROM" -le 7 ]; then
   # mrproper also removes the runtime libs copied in by STEP 4; restore them.
   run "$ROOT/runtime/build_and_install_runtime.sh"
   run make -C "$ROOT/linux" "${K[@]}" defconfig
+  # MMU arch: lunatix-mmu's defconfig is actually NOMMU, so force CONFIG_MMU=y (+ olddefconfig
+  # to pull in the paging/uaccess deps) for the mmu build.
+  if [ -n "$MMU" ]; then
+    run "$ROOT/linux/scripts/config" --file "$ROOT/linux/.config" --enable CONFIG_MMU
+    # The GOOD MMU image packs the STATIC mmu_initramfs.txt cpio spec (busybox+doom+sndtest+wad,
+    # /init->/doom), NOT the dynamic initramfs_root dir that defconfig/NOMMU uses. Packing the
+    # dynamic dir into an MMU kernel is exactly the 118MB/2-color no-render failure.
+    run "$ROOT/linux/scripts/config" --file "$ROOT/linux/.config" \
+        --set-str CONFIG_INITRAMFS_SOURCE "../mmu_initramfs.txt"
+    run make -C "$ROOT/linux" "${K[@]}" olddefconfig
+  fi
   # DEBUG_CONSOLE=1: route the console to ttyS0 (which writes via __subleq_putchar -> host
   # stdout) and keep the boot console, so kernel AND userspace output are visible headless
   # (default console=tty0 goes to the framebuffer, hiding userspace + any exec/panic).
