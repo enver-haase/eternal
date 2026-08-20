@@ -18,6 +18,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/time.h>
 
 #include "z_zone.h"
 #include "i_system.h"
@@ -32,11 +33,26 @@ typedef unsigned char u8;
 
 static int opl_fd = -1;
 
+// Milliseconds from "now" at which the writes we are currently emitting are
+// meant to take effect. The sequencer runs AHEAD of real time (see
+// I_UpdateMusic) and stamps every register write with its intended moment; the
+// VM's sound card holds the write and applies it at that sample position.
+//
+// This is what makes the music keep time on a machine this slow. The game loop
+// here iterates only ~7 times a second, so without a timestamp every event in
+// a 140 ms span lands on whichever loop iteration flushed it, and a score
+// written on a 250 ms grid comes out with +-100 ms of jitter. The 15 spare bits
+// of the /dev/opl word carry the offset, so a VM that ignores them (or an older
+// one) still plays everything immediately, exactly as before.
+static unsigned mus_sched_dt;   // 0 = apply immediately
+
 static void opl(int reg, int val)
 {
     if (opl_fd < 0)
         return;
-    unsigned int packed = (unsigned int)(((reg & 0x1FF) << 8) | (val & 0xFF));
+    unsigned int dt = mus_sched_dt > 0x7FFF ? 0x7FFF : mus_sched_dt;
+    unsigned int packed = (unsigned int)((dt << 17)
+                                         | ((reg & 0x1FF) << 8) | (val & 0xFF));
     (void)!write(opl_fd, &packed, 4);
 }
 
@@ -120,13 +136,41 @@ static int       mus_paused;
 static int       mus_looping;
 static int       mus_delay;     // ticks remaining before next event group
 
-// MUS score tick rate (140 Hz). The sequencer is driven from DOOM's game clock
-// (I_GetTime, 35 Hz tics) so it advances whenever the game does: 140/35 = 4 MUS
-// ticks per game tic. Robust on the slow VM (no dependence on render frame rate
-// or a fine wall-clock); tempo tracks game time, as with the original.
-#define MUS_TICKS_PER_GAMETIC 4
+// MUS score tick rate is 140 Hz. The sequencer keeps its own millisecond clock
+// and runs AHEAD of real time by MUS_LOOKAHEAD_MS, stamping each register write
+// with how far in the future it belongs (see opl() above). Tempo therefore comes
+// from the wall clock and not from how often the render loop happens to call us,
+// which on this VM is only ~7 Hz.
+#define MUS_TICKS_PER_SEC     140
+#define MUS_LOOKAHEAD_MS      250   // must exceed one game-loop period
+#define MUS_RESYNC_MS        1000   // stall longer than this: drop the backlog
 
-static int last_gametic = -1;
+static unsigned mus_base_ms;        // wall-clock time of tick 0
+static unsigned mus_ticks;          // song position, in MUS ticks since the base
+static int      mus_clock_running;
+
+// Wall clock in milliseconds. gettimeofday() reads the VM's RTC, the same clock
+// I_GetTime uses, so this is real time even though the guest is far from it.
+static unsigned mus_now_ms(void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, 0);
+    return (unsigned)(tv.tv_sec * 1000u + tv.tv_usec / 1000u);
+}
+
+// Wall-clock time of a tick. 1000/140 ms per tick, kept in integers as 100/14.
+static unsigned mus_tick_ms(unsigned tick)
+{
+    return mus_base_ms + (tick * 100u) / 14u;
+}
+
+static void mus_clock_reset(void)
+{
+    mus_base_ms = mus_now_ms();
+    mus_ticks = 0;
+    mus_clock_running = 1;
+    mus_sched_dt = 0;
+}
 
 // ------------------------------------------------------------ OPL programming
 
@@ -144,6 +188,22 @@ static void opl_program_voice(int v, const u8 *voice)
 }
 
 // Set the carrier output level from the patch base + MUS/master volume.
+// Extra attenuation for a MIDI volume of 0..127, in the register's 0.75 dB
+// steps: att = 20*log10(127/vol) / 0.75. The previous curve interpolated
+// linearly in the ATTENUATION domain, which is exponential in loudness — at
+// half volume it threw away 28 dB instead of 6, and left the music inaudible
+// under the sound effects. Volume is a dB scale; this table is that scale.
+static const u8 vol_att[128] = {
+    63, 56, 48, 43, 40, 37, 35, 34, 32, 31, 29, 28, 27, 26, 26, 25,
+    24, 23, 23, 22, 21, 21, 20, 20, 19, 19, 18, 18, 18, 17, 17, 16,
+    16, 16, 15, 15, 15, 14, 14, 14, 13, 13, 13, 13, 12, 12, 12, 12,
+    11, 11, 11, 11, 10, 10, 10, 10,  9,  9,  9,  9,  9,  8,  8,  8,
+     8,  8,  8,  7,  7,  7,  7,  7,  7,  6,  6,  6,  6,  6,  6,  5,
+     5,  5,  5,  5,  5,  5,  5,  4,  4,  4,  4,  4,  4,  4,  3,  3,
+     3,  3,  3,  3,  3,  3,  3,  2,  2,  2,  2,  2,  2,  2,  2,  2,
+     1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  0,  0,  0,  0,  0,  0,
+};
+
 static void opl_set_level(int v, const u8 *voice, int midi_ch)
 {
     int co = op_off[v][1];
@@ -151,7 +211,8 @@ static void opl_set_level(int v, const u8 *voice, int midi_ch)
     int base = car[5] & 0x3F;                            // patch attenuation (0=loud)
     int vol  = (chans[midi_ch].volume * music_volume) / 15;  // 0..127
     if (vol > 127) vol = 127;
-    int att  = base + ((63 - base) * (127 - vol)) / 127;    // louder vol -> less att
+    if (vol < 0)   vol = 0;
+    int att  = base + vol_att[vol];
     if (att > 63) att = 63;
     opl(0x40 + co, (car[4] & 0xC0) | (att & 0x3F));
 }
@@ -309,30 +370,60 @@ static void mus_advance_group(void)
 
 // ------------------------------------------------------------------ public API
 
-// Called once per game loop (from D_DoomLoop). Advances the score by the game
-// clock (I_GetTime, 35 Hz), 4 MUS ticks per game tic.
+// Called once per game loop (from D_DoomLoop), which on this VM is only ~7 Hz.
+// Rather than emitting whatever the score owes at that instant, run the
+// sequencer forward to MUS_LOOKAHEAD_MS beyond real time and stamp every
+// register write with the moment it belongs to; the sound card then places each
+// write at the right sample. The result keeps the score's timing regardless of
+// how jerkily this function is called.
 void I_UpdateMusic(void)
 {
-    int now, dt, ticks;
+    unsigned now, horizon;
+    int guard = 8192;                       // never spin on a pathological score
 
     if (opl_fd < 0 || !mus_playing || mus_paused) {
-        last_gametic = -1;
+        mus_clock_running = 0;
         return;
     }
 
-    now = I_GetTime();
-    if (last_gametic < 0) { last_gametic = now; return; }   // establish baseline
+    if (!mus_clock_running)
+        mus_clock_reset();
 
-    dt = now - last_gametic;
-    last_gametic = now;
-    if (dt < 0)  dt = 0;
-    if (dt > 35) dt = 35;                                    // clamp a long stall to ~1 s
+    now = mus_now_ms();
 
-    ticks = dt * MUS_TICKS_PER_GAMETIC;
-    while (ticks-- > 0 && mus_playing) {
-        if (mus_delay > 0) { mus_delay--; continue; }
-        mus_advance_group();
+    // A stall longer than MUS_RESYNC_MS (tab backgrounded, huge hitch) would
+    // otherwise be repaid as one enormous burst of notes. Drop the backlog and
+    // carry on from here instead.
+    if ((int)(now - mus_tick_ms(mus_ticks)) > MUS_RESYNC_MS) {
+        mus_base_ms = now;
+        mus_ticks = 0;
     }
+
+    horizon = now + MUS_LOOKAHEAD_MS;
+    while (mus_playing && guard-- > 0) {
+        unsigned tick_ms = mus_tick_ms(mus_ticks);
+        if ((int)(tick_ms - horizon) > 0)
+            break;                          // scheduled far enough ahead
+
+        // How far in the future this tick is. Negative means we are behind
+        // (the loop stalled): emit it immediately.
+        int dt = (int)(tick_ms - now);
+        mus_sched_dt = dt > 0 ? (unsigned)dt : 0;
+
+        if (mus_delay > 0) {
+            mus_delay--;
+        } else {
+            // Firing a group also sets the delay to the next one. That delay is
+            // counted from THIS tick, so this tick is its first — without the
+            // decrement below every group costs one tick too many. A note is two
+            // groups (its note-on and its note-off), so the score dragged by two
+            // ticks per note: 14.3 ms on a 250 ms grid, a measured +5.6%.
+            mus_advance_group();
+            if (mus_delay > 0) mus_delay--;
+        }
+        mus_ticks++;
+    }
+    mus_sched_dt = 0;                       // anything else is immediate
 }
 
 void I_InitMusic(void)
@@ -406,7 +497,7 @@ void I_PlaySong(int handle, int looping)
     mus_looping = looping;
     mus_paused = 0;
     mus_playing = 1;
-    last_gametic = -1;
+    mus_clock_reset();
 }
 
 void I_StopSong(int handle)
