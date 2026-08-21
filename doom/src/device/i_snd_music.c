@@ -46,6 +46,12 @@ static int opl_fd = -1;
 // one) still plays everything immediately, exactly as before.
 static unsigned mus_sched_dt;   // 0 = apply immediately
 
+// Register 0x1FF is not a real OPL register; the VM reads it as "drop every
+// write still queued for the future". Needed because we now schedule over a
+// second of music ahead: without it, stopping a song would leak the tail of it
+// into the next one.
+#define OPL_CMD_FLUSH 0x1FF
+
 static void opl(int reg, int val)
 {
     if (opl_fd < 0)
@@ -55,6 +61,22 @@ static void opl(int reg, int val)
                                          | ((reg & 0x1FF) << 8) | (val & 0xFF));
     (void)!write(opl_fd, &packed, 4);
 }
+
+static void opl_flush(void)
+{
+    unsigned save = mus_sched_dt;
+    mus_sched_dt = 0;                       // the command itself is immediate
+    opl(OPL_CMD_FLUSH, 0);
+    mus_sched_dt = save;
+}
+
+// An OPL3 has eighteen 2-operator voices: nine per bank, the second bank
+// addressed by OR-ing 0x100 into the register. We use all of them — E1M1 alone
+// reaches ten simultaneous notes, and double-voice instruments take two voices
+// each, so nine would steal voices from a piece that has not finished with them.
+#define NUM_VOICES 18
+#define VOICE_BANK(v)  ((v) >= 9 ? 0x100 : 0x000)
+#define VOICE_CH(v)    ((v) % 9)
 
 // Modulator/carrier operator register offsets for the 9 melodic channels.
 static const u8 op_off[9][2] = {
@@ -84,7 +106,8 @@ static const unsigned short note_fnum[12] = {
 //   sustain, waveform, key-scale, level.
 #define GENMIDI_NUM      175
 #define INSTR_SIZE       36
-#define GENMIDI_FLAG_FIXED 0x01
+#define GENMIDI_FLAG_FIXED  0x01
+#define GENMIDI_FLAG_DOUBLE 0x04   // instrument plays as two detuned voices
 
 static const u8 *genmidi;   // -> first instrument (past the 8-byte header)
 
@@ -111,7 +134,7 @@ typedef struct {
     u8       b0;        // last 0xB0 value (block+fnum-hi), for clean key-off
 } oplvoice_t;
 
-static oplvoice_t voices[9];
+static oplvoice_t voices[NUM_VOICES];
 static unsigned   voice_clock = 0;
 
 // --------------------------------------------------------------- MUS channels
@@ -142,8 +165,19 @@ static int       mus_delay;     // ticks remaining before next event group
 // from the wall clock and not from how often the render loop happens to call us,
 // which on this VM is only ~7 Hz.
 #define MUS_TICKS_PER_SEC     140
-#define MUS_LOOKAHEAD_MS      250   // must exceed one game-loop period
-#define MUS_RESYNC_MS        1000   // stall longer than this: drop the backlog
+#define MUS_LOOKAHEAD_MS     3000   // see below: must outlast a level load
+#define MUS_RESYNC_MS        3000   // stall longer than this: drop the backlog
+
+// The lookahead is deliberately far longer than one game-loop period. This
+// machine stops the world for over a second when DOOM loads a level, and the
+// sequencer cannot run while it does; with only a couple of hundred milliseconds
+// queued, the music fell silent for the whole load and the notes due in it were
+// discarded by the resync — an audible hole with the last chord ringing out.
+// Measured: the load stall at the demo transition silences the guest for about
+// 2.9 s, and a 1.2 s queue left a 1.7 s hole in the music. Three seconds covers
+// it, so the VM already holds those writes and keeps placing them on time while
+// the guest is busy. The cost is that anything
+// which changes the music has to flush what is queued (see opl_flush).
 
 static unsigned mus_base_ms;        // wall-clock time of tick 0
 static unsigned mus_ticks;          // song position, in MUS ticks since the base
@@ -176,15 +210,18 @@ static void mus_clock_reset(void)
 
 static void opl_program_voice(int v, const u8 *voice)
 {
-    int mo = op_off[v][0], co = op_off[v][1];
+    int bank = VOICE_BANK(v);
+    int mo = op_off[VOICE_CH(v)][0], co = op_off[VOICE_CH(v)][1];
     const u8 *mod = voice;
     const u8 *car = voice + 7;
     int fb = voice[6];
 
-    opl(0x20 + mo, mod[0]); opl(0x60 + mo, mod[1]); opl(0x80 + mo, mod[2]); opl(0xE0 + mo, mod[3]);
-    opl(0x40 + mo, (mod[4] & 0xC0) | (mod[5] & 0x3F));   // modulator level fixed from patch
-    opl(0x20 + co, car[0]); opl(0x60 + co, car[1]); opl(0x80 + co, car[2]); opl(0xE0 + co, car[3]);
-    opl(0xC0 + v, (fb & 0x0F) | 0x30);                   // feedback/conn + L,R (OPL3 stereo)
+    opl(bank | (0x20 + mo), mod[0]); opl(bank | (0x60 + mo), mod[1]);
+    opl(bank | (0x80 + mo), mod[2]); opl(bank | (0xE0 + mo), mod[3]);
+    opl(bank | (0x40 + mo), (mod[4] & 0xC0) | (mod[5] & 0x3F));  // modulator level from patch
+    opl(bank | (0x20 + co), car[0]); opl(bank | (0x60 + co), car[1]);
+    opl(bank | (0x80 + co), car[2]); opl(bank | (0xE0 + co), car[3]);
+    opl(bank | (0xC0 + VOICE_CH(v)), (fb & 0x0F) | 0x30);        // feedback/conn + L,R
 }
 
 // Set the carrier output level from the patch base + MUS/master volume.
@@ -206,7 +243,7 @@ static const u8 vol_att[128] = {
 
 static void opl_set_level(int v, const u8 *voice, int midi_ch)
 {
-    int co = op_off[v][1];
+    int co = op_off[VOICE_CH(v)][1];
     const u8 *car = voice + 7;
     int base = car[5] & 0x3F;                            // patch attenuation (0=loud)
     int vol  = (chans[midi_ch].volume * music_volume) / 15;  // 0..127
@@ -214,23 +251,32 @@ static void opl_set_level(int v, const u8 *voice, int midi_ch)
     if (vol < 0)   vol = 0;
     int att  = base + vol_att[vol];
     if (att > 63) att = 63;
-    opl(0x40 + co, (car[4] & 0xC0) | (att & 0x3F));
+    opl(VOICE_BANK(v) | (0x40 + co), (car[4] & 0xC0) | (att & 0x3F));
 }
 
-static void opl_keyon(int v, int note)
+// `detune` shifts the pitch by a fraction of a semitone; GENMIDI gives the
+// second voice of a double-voice instrument its own fine tuning, and that slight
+// beating between the two is most of what makes those instruments sound the way
+// they do.
+static void opl_keyon(int v, int note, int detune)
 {
+    int bank = VOICE_BANK(v), ch = VOICE_CH(v);
     int block = note / 12 - 1;
     if (block < 0) block = 0;
     if (block > 7) block = 7;
     int fnum = note_fnum[note % 12];
-    opl(0xA0 + v, fnum & 0xFF);
+    if (detune)
+        fnum += (int)(((long)fnum * detune) / 1108);    // ~1/64 semitone per step
+    if (fnum < 1) fnum = 1;
+    if (fnum > 1023) fnum = 1023;
+    opl(bank | (0xA0 + ch), fnum & 0xFF);
     voices[v].b0 = (u8)((block << 2) | ((fnum >> 8) & 3));
-    opl(0xB0 + v, 0x20 | voices[v].b0);                 // 0x20 = key-on
+    opl(bank | (0xB0 + ch), 0x20 | voices[v].b0);       // 0x20 = key-on
 }
 
 static void opl_keyoff(int v)
 {
-    opl(0xB0 + v, voices[v].b0);                        // clear key-on, keep block/fnum
+    opl(VOICE_BANK(v) | (0xB0 + VOICE_CH(v)), voices[v].b0);   // clear key-on
 }
 
 // -------------------------------------------------------------- voice alloc
@@ -239,7 +285,7 @@ static int voice_alloc(int midi_ch, int note)
 {
     int i, oldest = 0;
     unsigned oldest_age = 0xFFFFFFFFu;
-    for (i = 0; i < 9; i++) {
+    for (i = 0; i < NUM_VOICES; i++) {
         if (!voices[i].used) { oldest = i; break; }
         if (voices[i].age < oldest_age) { oldest_age = voices[i].age; oldest = i; }
     }
@@ -255,11 +301,12 @@ static int voice_alloc(int midi_ch, int note)
 static void voice_release(int midi_ch, int note)
 {
     int i;
-    for (i = 0; i < 9; i++) {
+    for (i = 0; i < NUM_VOICES; i++) {
+        // No early exit: a double-voice instrument holds two voices for the same
+        // (channel, note) and both have to be released.
         if (voices[i].used && voices[i].midi_ch == midi_ch && voices[i].note == note) {
             opl_keyoff(i);
             voices[i].used = 0;
-            return;
         }
     }
 }
@@ -267,7 +314,7 @@ static void voice_release(int midi_ch, int note)
 static void voices_all_off(void)
 {
     int i;
-    for (i = 0; i < 9; i++) {
+    for (i = 0; i < NUM_VOICES; i++) {
         if (voices[i].used) { opl_keyoff(i); voices[i].used = 0; }
     }
 }
@@ -304,10 +351,31 @@ static void mus_play_note(int midi_ch, int note, int vol)
     if (play_note < 0)   play_note = 0;
     if (play_note > 95)  play_note = 95;
 
+    // A voice record carries its own base-note offset (signed, last two bytes).
+    int off1 = (short)(voice[14] | (voice[15] << 8));
+    int n1 = play_note + off1;
+    if (n1 < 0)  n1 = 0;
+    if (n1 > 95) n1 = 95;
+
     int v = voice_alloc(midi_ch, note);
     opl_program_voice(v, voice);
     opl_set_level(v, voice, midi_ch);
-    opl_keyon(v, play_note);
+    opl_keyon(v, n1, 0);
+
+    // Double-voice instruments are two 2-operator voices played together, the
+    // second one detuned by the instrument's fine tuning (128 = dead centre).
+    // Leaving it out is why our percussion sounded duller than it should.
+    if (flags & GENMIDI_FLAG_DOUBLE) {
+        const u8 *voice2 = instr + 4 + 16;
+        int off2 = (short)(voice2[14] | (voice2[15] << 8));
+        int n2 = play_note + off2;
+        if (n2 < 0)  n2 = 0;
+        if (n2 > 95) n2 = 95;
+        int v2 = voice_alloc(midi_ch, note);
+        opl_program_voice(v2, voice2);
+        opl_set_level(v2, voice2, midi_ch);
+        opl_keyon(v2, n2, (int)instr[2] - 128);
+    }
 }
 
 // Process one group of simultaneous events, then set the delay to the next.
@@ -492,24 +560,41 @@ void I_PlaySong(int handle, int looping)
     int i;
     for (i = 0; i < 16; i++) chans[i].volume = 100;
     voices_all_off();
+    opl_flush();                        // drop anything queued from the last song
     mus_pos = mus_loop;
     mus_delay = 0;
     mus_looping = looping;
     mus_paused = 0;
     mus_playing = 1;
     mus_clock_reset();
+
+    // Fill the queue right now rather than waiting for the next game loop.
+    // DOOM calls this just BEFORE it loads the level, and loading stops this
+    // machine for the better part of two seconds — measured 1779 ms. Without
+    // priming, the flush above leaves the VM with nothing to play and the music
+    // does not resume until the load finishes: an audible hole at every level
+    // change. Priming hands the VM MUS_LOOKAHEAD_MS of music first, and it keeps
+    // placing those writes on time while the guest is frozen.
+    I_UpdateMusic();
 }
 
 void I_StopSong(int handle)
 {
     mus_playing = 0;
     voices_all_off();
+    // Deliberately NOT flushing here. What is queued is up to MUS_LOOKAHEAD_MS of
+    // this song, and the guest is usually about to stall for a second or more
+    // loading the next level — that queued music is exactly what covers the stall.
+    // Flushing it here left a 1.65 s hole in the music at every demo transition.
+    // I_PlaySong flushes instead, and it does so at the moment the next song's
+    // first note is scheduled, so there is no gap and no overlap.
 }
 
 void I_PauseSong(int handle)
 {
     mus_paused = 1;
     voices_all_off();
+    opl_flush();          // likewise: a pause has to silence what is queued too
 }
 
 void I_ResumeSong(int handle)
