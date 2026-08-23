@@ -41,6 +41,26 @@ void I_InitGraphics (void)
                 exit(3);
         }
 
+    /* Ask for our own resolution. The console runs big; the game renders 320x200 and lets the
+     * host scale it, which costs the guest nothing -- as opposed to the 2x doubling into a
+     * larger buffer this backend used to do, which cost 256000 pixel writes a frame. If the
+     * driver will not switch, fall through and use whatever mode is set. */
+    vinfo.xres = SCREENWIDTH;
+    vinfo.yres = SCREENHEIGHT;
+    vinfo.xres_virtual = SCREENWIDTH;
+    vinfo.yres_virtual = SCREENHEIGHT;
+    vinfo.bits_per_pixel = 32;
+    if (ioctl(fbfd, FBIOPUT_VSCREENINFO, &vinfo))
+        printf("Warning: cannot set %dx%d; using the current mode\n", SCREENWIDTH, SCREENHEIGHT);
+    if (ioctl(fbfd, FBIOGET_VSCREENINFO, &vinfo)) {
+        printf("Error re-reading variable information.\n");
+        exit(3);
+    }
+    if (ioctl(fbfd, FBIOGET_FSCREENINFO, &finfo)) {
+        printf("Error re-reading fixed information.\n");
+        exit(2);
+    }
+
     /* Figure out the size of the screen in bytes */
     screensize = vinfo.xres * vinfo.yres * vinfo.bits_per_pixel / 8;
     printf("Screen size is %d\n",screensize);
@@ -69,6 +89,9 @@ void I_InitGraphics (void)
 void I_ShutdownGraphics(void)
 {
     munmap(fbp, screensize);
+
+    /* The console mode is restored by the KERNEL when this fd closes (see subleqfb_release):
+     * a game that crashes cannot be relied on to switch back, so it is not the game's job. */
     close(fbfd);
 
     // Text mode
@@ -122,27 +145,22 @@ void I_UpdateNoBlit (void)
 
 }
 
-// I_FinishUpdate: 2x2 pixel doubling from screens[0] (XRGB) to framebuffer.
-// Each 320x200 source pixel becomes a 2x2 block in the framebuffer.
-// Image is centred within the framebuffer.
-extern void RenderBlit(uint32_t *sp, uint32_t *dp, int width, int height, int fb_stride_words);
-
+// I_FinishUpdate: straight 1:1 copy from screens[0] (XRGB) into the framebuffer, which is
+// exactly SCREENWIDTH x SCREENHEIGHT. There is nothing to scale and nothing to centre: the
+// host presents the frame at whatever size its window is. This replaced a 2x pixel-doubling
+// blit into an 800x512 buffer, whose black border the guest also had to own -- four times the
+// writes, for an image the host then scaled anyway.
 void I_FinishUpdate (void)
 {
-    uint32_t *src = screens[0];
-    uint32_t *dst = (uint32_t *)fbp;
+    const uint32_t *src = (const uint32_t *)screens[0];
+    uint32_t       *dst = (uint32_t *)fbp;
+    int             n   = SCREENWIDTH * SCREENHEIGHT;
+    int             i;
 
-    // Centre the 2x-doubled image within the framebuffer
-    int doubled_w = SCREENWIDTH * 2;
-    int doubled_h = SCREENHEIGHT * 2;
-    int x_offset = ((int)vinfo.xres - doubled_w) / 2;
-    int y_offset = ((int)vinfo.yres - doubled_h) / 2;
-    if (x_offset < 0) x_offset = 0;
-    if (y_offset < 0) y_offset = 0;
-
-    dst += y_offset * fb_stride_words + x_offset;
-
-    RenderBlit(src, dst, SCREENWIDTH, SCREENHEIGHT, fb_stride_words);
+    // Word-at-a-time on purpose: the fb is contiguous at this resolution, and a word loop is
+    // what the Subleq backend can actually do well.
+    for (i = 0; i < n; i++)
+        dst[i] = src[i];
 }
 
 void I_ReadScreen (uint32_t* scr)
