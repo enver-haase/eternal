@@ -50,6 +50,10 @@ void I_InitGraphics (void)
     vinfo.xres_virtual = SCREENWIDTH;
     vinfo.yres_virtual = SCREENHEIGHT;
     vinfo.bits_per_pixel = 32;
+    /* FB_ACTIVATE_NOW, explicitly: fb_set_var() returns SUCCESS without applying anything when
+     * the activate field says otherwise, so inheriting whatever the driver had there can mean a
+     * mode set that silently does nothing. */
+    vinfo.activate = FB_ACTIVATE_NOW;
     if (ioctl(fbfd, FBIOPUT_VSCREENINFO, &vinfo))
         printf("Warning: cannot set %dx%d; using the current mode\n", SCREENWIDTH, SCREENHEIGHT);
     if (ioctl(fbfd, FBIOGET_VSCREENINFO, &vinfo)) {
@@ -60,6 +64,9 @@ void I_InitGraphics (void)
         printf("Error re-reading fixed information.\n");
         exit(2);
     }
+
+    printf("Framebuffer mode is %ux%u, stride %u bytes (asked for %dx%d)\n",
+           vinfo.xres, vinfo.yres, finfo.line_length, SCREENWIDTH, SCREENHEIGHT);
 
     /* Figure out the size of the screen in bytes */
     screensize = vinfo.xres * vinfo.yres * vinfo.bits_per_pixel / 8;
@@ -154,13 +161,19 @@ void I_FinishUpdate (void)
 {
     const uint32_t *src = (const uint32_t *)screens[0];
     uint32_t       *dst = (uint32_t *)fbp;
-    int             n   = SCREENWIDTH * SCREENHEIGHT;
-    int             i;
+    int             y, x;
 
-    // Word-at-a-time on purpose: the fb is contiguous at this resolution, and a word loop is
-    // what the Subleq backend can actually do well.
-    for (i = 0; i < n; i++)
-        dst[i] = src[i];
+    // Row by row at the framebuffer's own stride. Copying the frame as one contiguous run is
+    // only correct when the mode is exactly our resolution: if it is wider, the rows land
+    // several across and squashed into the top of the screen. Same number of writes either
+    // way, and word-at-a-time on purpose -- a word loop is what the Subleq backend does well.
+    for (y = 0; y < SCREENHEIGHT; y++) {
+        uint32_t *row = dst + (size_t)y * fb_stride_words;
+
+        for (x = 0; x < SCREENWIDTH; x++)
+            row[x] = src[x];
+        src += SCREENWIDTH;
+    }
 }
 
 void I_ReadScreen (uint32_t* scr)
