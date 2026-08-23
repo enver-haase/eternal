@@ -39,6 +39,16 @@ LLVM_BIN = os.path.join(PROJECT_ROOT, "llvm-project", "build", "bin")
 REG_BASE = 1024
 
 
+# Framebuffer geometry, mirroring arch/subleq/include/asm/subleq_fb.h. The reservation is
+# page-aligned, which is what keeps FB_ADDR on a page boundary (the region is memblock-reserved
+# and mmapped into userspace, so a base halfway into a page breaks the mapping).
+FB_WIDTH  = 1280        # the mode the machine comes up in (the console); DOOM switches down
+FB_HEIGHT = 960
+FB_BYTES  = FB_WIDTH * FB_HEIGHT * 4
+FB_SIZE   = (FB_BYTES + 4095) & ~4095
+FB_ADDR   = 0x60000000 - FB_SIZE
+
+
 def create_boot_sequence(text_start, stack_size, main_offset=0, reg_base=REG_BASE):
     """Create the boot sequence based on text_start.
 
@@ -65,8 +75,18 @@ def create_boot_sequence(text_start, stack_size, main_offset=0, reg_base=REG_BAS
     boot[4] = 0                 # B = byte addr 0 -> mem[0]-=mem[0]=0, branch taken
     boot[5] = jump_to_main_addr # C = byte addr of jump-to-main instruction
 
-    # Word 6: video RAM location (VM cell, in words; does not move).
-    boot[6] = 0x17F9C000
+    # Word 6: video RAM location (VM cell, a WORD index). The VM reads this to find the
+    # framebuffer, so it is the third side of a contract whose other two sides are
+    # arch/subleq/include/asm/subleq_fb.h (the kernel reserves and maps the region) and
+    # FB_W/FB_H in lunatix src/vm.h (the host blits FB_BYTES out of it). All three must agree.
+    # It used to be the literal 0x17F9C000, which silently outlived a resolution change: the
+    # kernel reserved and drew at the new address while the VM kept displaying the old one, so
+    # DOOM was audible but invisible and the window showed unrelated RAM as stripes.
+    boot[6] = FB_ADDR >> 2
+    # Words 7 and 8: the live mode. The kernel's fb driver republishes these on every mode set
+    # (see subleqfb_publish); these are the values in force before it probes.
+    boot[7] = FB_WIDTH
+    boot[8] = FB_HEIGHT
 
     # ESI register-file cells at their (relocated) homes.
     boot[4 + reg_base]  = stack_size  # SP init value (stack top)
