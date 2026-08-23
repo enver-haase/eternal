@@ -31,7 +31,26 @@ slink /bin/sh /bin/busybox 0777 0 0
 # Sound-device self-test (static ET_EXEC) — kept as a diagnostic tool.
 file /sndtest ../sndtest 0755 0 0
 
-# fbdoom (static ET_EXEC, page-1) + shareware WAD (found via cwd "." = /)
+# fbdoom (static ET_EXEC, page-1). The game finds its IWAD in $DOOMWADDIR, so each edition
+# lives in its own directory with exactly its own WAD -- the file NAME is what tells the game
+# which edition it is (doomu.wad = Ultimate/retail, doom.wad = registered, doom1.wad =
+# shareware, doom2.wad = Doom II), so one per directory keeps them from shadowing each other.
+#
+# /wadrun dispatches on argv[0] and is linked as one command per edition. The licensed WADs are
+# NOT in the repository -- they live in wads/ on the build host, which .gitignore excludes.
 file /doom ../doom/doom 0755 0 0
-file /doom1.wad ../doom/doom1.wad 0644 0 0
+file /wadrun ../wadrun 0755 0 0
+dir /wads 0755 0 0
+dir /wads/shareware 0755 0 0
+dir /wads/registered 0755 0 0
+dir /wads/ultimate 0755 0 0
+dir /wads/doom2 0755 0 0
+file /wads/shareware/doom1.wad ../wads/shareware/doom1.wad 0644 0 0
+file /wads/registered/doom.wad ../wads/registered/doom.wad 0644 0 0
+file /wads/ultimate/doomu.wad ../wads/ultimate/doomu.wad 0644 0 0
+file /wads/doom2/doom2.wad ../wads/doom2/doom2.wad 0644 0 0
+slink /bin/doom /wadrun 0777 0 0
+slink /bin/doom19 /wadrun 0777 0 0
+slink /bin/udoom /wadrun 0777 0 0
+slink /bin/doom2 /wadrun 0777 0 0
 
