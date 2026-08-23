@@ -75,8 +75,33 @@ retarget_sysroot() {
   grep -h -oE "runtime/sysroot[A-Za-z0-9_-]*" "$ROOT/doom/Makefile" "$ROOT/busybox/.config" \
       "$ROOT/uclibc-ng/.config" | sort -u | sed "s/^/    consumers now use /"
 }
-log "retarget consumers to sysroot-$ARCH"
-retarget_sysroot
+# Prove the C library actually reached THIS arch's sysroot before anything links against it.
+# uClibc's RUNTIME_PREFIX/DEVEL_PREFIX are CONCATENATED onto PREFIX, so a stray "build/" in
+# them installs a perfectly good libc into <sysroot>build/ -- a sibling directory nothing
+# reads -- while every link quietly picks up whatever stale libc.a the sysroot already held.
+# Statically, i.e. baked into busybox and doom. That is how a July libc ended up inside the
+# MMU userspace under freshly assembled crt objects, and it presents as a userspace that dies
+# at _start three steps later. Fail here, with the evidence, instead.
+assert_libc_installed() {
+  local installed="$SYS/lib/libc.a" built="$ROOT/uclibc-ng/lib/libc.a"
+  if [ ! -f "$installed" ]; then
+    echo "FATAL: $installed is missing -- uClibc's install did not reach this sysroot."
+    echo "       Check RUNTIME_PREFIX/DEVEL_PREFIX in uclibc-ng/.config: they are appended to"
+    echo "       PREFIX, so they must be \"/\" for a sysroot install. Stray copies:"
+    find "$ROOT/runtime" -maxdepth 3 -name libc.a -printf "         %TY-%Tm-%Td %TH:%TM  %p\n" 2>/dev/null
+    exit 1
+  fi
+  if [ -f "$built" ] && [ "$built" -nt "$installed" ]; then
+    echo "FATAL: $installed is OLDER than the libc just built in uclibc-ng/lib."
+    echo "       The install went somewhere else; linking now would bake a stale C library"
+    echo "       into busybox and doom. Same cause as above: check the two PREFIX variables."
+    ls -la "$built" "$installed"
+    find "$ROOT/runtime" -maxdepth 3 -name libc.a -printf "         %TY-%Tm-%Td %TH:%TM  %p\n" 2>/dev/null
+    exit 1
+  fi
+  log "libc.a in place: $(ls -la "$installed" | awk '{print $6, $7, $8, $9}')"
+}
+
 CLANG="$TC/bin/clang"                         # default triple = subleq-unknown-linux
 export SUBLEQ_TOOLCHAIN="$TC" SUBLEQ_SYSROOT="$SYS" SUBLEQ_LINUX="$ROOT/linux"
 export SUBLEQ_REG_BASE="$REGBASE"             # runtime generator (gen_runtime.py) must match the arch
@@ -88,6 +113,8 @@ run(){ echo "+ $*"; "$@"; }
 [ -x "$CLANG" ] || { echo "toolchain missing: $CLANG (build step 1 first)"; exit 1; }
 "$CLANG" --version | grep -q "subleq-unknown-linux" || { echo "clang is not subleq-targeted"; exit 1; }
 log "build-arch $ARCH  toolchain=$TC  regbase=$REGBASE  sysroot=$SYS  from step $FROM"
+log "retarget consumers to sysroot-$ARCH"
+retarget_sysroot
 
 # ---- step 0: pin the kernel + uClibc trees to the arch's reference commits.
 # cable-NOMMU: pure upstream (page-0 crt, direct-call syscall). MMU: lunatix-mmu uClibc has
@@ -145,6 +172,7 @@ fi
 # ---- step 6: BusyBox (its .config is in-tree; force the NOMMU toolchain)
 if [ "$FROM" -le 6 ]; then
   log "STEP 6  BusyBox (static)"
+  assert_libc_installed
   # Link BusyBox statically: dynamic linking (ld-uClibc + libc.so) does not yet work in the
   # self-built NOMMU userspace (busybox dies at dynamic startup), but -static produces a
   # working self-relocating static-PIE (same path as the static crt test + the doom binary).
@@ -175,6 +203,7 @@ fi
 #      launcher /init. Must run AFTER the sysroot runtime (step 4) so doom links page-0 regs.
 if [ "$FROM" -le 6 ] && [ -n "$WITH_DOOM" ]; then
   log "STEP 6.5  fbdoom (build from source + initramfs)"
+  assert_libc_installed
   # doom_asm.S is arch-specific: the MMU commit 8367ddf moved R_DrawColumn/R_DrawSpan
   # draw-scratch from .text to .bss (needed because MMU makes .text read-only). On NOMMU
   # .text is writable and that .bss move corrupts memory near the visplane arrays -> doom
