@@ -311,12 +311,22 @@ static void voice_release(int midi_ch, int note)
     }
 }
 
+// Silencing every voice is always a NOW operation, never a scheduled one, so it forces
+// mus_sched_dt to 0 for its duration the same way opl_flush() does. Without that, the calls
+// from inside mus_advance_group() (song loop and song end) inherit the current tick's
+// lookahead offset -- up to MUS_LOOKAHEAD_MS, i.e. three seconds -- and stamp their key-offs
+// that far into the future. The VM applies them on time, faithfully, long after the next song
+// has started: with a GENMIDI instrument whose release rate is 1 the voice then decays for
+// seconds more, which is heard as a note that STARTS at the song change and drones on.
 static void voices_all_off(void)
 {
+    unsigned save = mus_sched_dt;
     int i;
+    mus_sched_dt = 0;
     for (i = 0; i < NUM_VOICES; i++) {
         if (voices[i].used) { opl_keyoff(i); voices[i].used = 0; }
     }
+    mus_sched_dt = save;
 }
 
 // -------------------------------------------------------------- MUS events
