@@ -58,7 +58,25 @@ if [ -n "$WITH_SOUND" ] && [ "$ARCH" = cable-nommu ]; then
   LINUX_REF="nommu-sound-v2"
 fi
 
-SYS="$ROOT/runtime/sysroot"                   # rebuilt wholesale by this run -> clean NOMMU sysroot
+# ONE SYSROOT PER ARCHITECTURE. The two flavours' libc.a, crt1.o, libc.so and busybox are
+# not interchangeable -- an MMU libc under a NOMMU kernel (or the reverse) dies at startup --
+# and a shared sysroot means whichever arch built last silently supplies the C library to the
+# other. That is the mixed-sysroot trap this tree has already paid for twice. There is
+# deliberately no plain runtime/sysroot any more: a stale hardcoded reference should fail
+# loudly rather than quietly link the wrong flavour.
+SYS="$ROOT/runtime/sysroot-$ARCH"
+
+# The consumers hardcode the sysroot path in files under version control (doom/Makefile,
+# busybox/.config, uclibc-ng/.config), so point them at this arch's sysroot. The pattern
+# matches any runtime/sysroot* suffix, so re-running for either arch just rewrites it.
+retarget_sysroot() {
+  sed -i -E "s#(runtime/sysroot)[A-Za-z0-9_-]*#\1-$ARCH#g" \
+      "$ROOT/doom/Makefile" "$ROOT/busybox/.config" "$ROOT/uclibc-ng/.config"
+  grep -h -oE "runtime/sysroot[A-Za-z0-9_-]*" "$ROOT/doom/Makefile" "$ROOT/busybox/.config" \
+      "$ROOT/uclibc-ng/.config" | sort -u | sed "s/^/    consumers now use /"
+}
+log "retarget consumers to sysroot-$ARCH"
+retarget_sysroot
 CLANG="$TC/bin/clang"                         # default triple = subleq-unknown-linux
 export SUBLEQ_TOOLCHAIN="$TC" SUBLEQ_SYSROOT="$SYS" SUBLEQ_LINUX="$ROOT/linux"
 export SUBLEQ_REG_BASE="$REGBASE"             # runtime generator (gen_runtime.py) must match the arch
