@@ -10,20 +10,14 @@
  * Runs as init; see mmu_initramfs_preempt.txt.
  */
 #include <unistd.h>
-#include <signal.h>
-#include <sys/syscall.h>
+#include <sys/types.h>
 
 /*
- * fork() does not exist in this userspace yet: the MMU sysroot's uClibc is still configured
- * ARCH_HAS_NO_MMU=y, so it offers only vfork (whose semantics -- child first, parent frozen --
- * cannot express "two tasks running at once"). The kernel implements clone perfectly well
- * (arch/subleq copy_thread), so call it directly: clone(SIGCHLD, 0, ...) with a NULL stack is
- * exactly what fork() is. Drop this shim once uClibc is rebuilt in MMU mode.
+ * This uses libc fork(), which only exists because uClibc is now built with SUBLEQ_MMU=y
+ * (before that the C library selected ARCH_HAS_NO_MMU and offered only vfork, whose
+ * semantics -- child first, parent frozen -- cannot express two tasks running at once).
+ * So a successful run of this test is also the proof that the MMU userspace is real.
  */
-static long fork_via_clone(void)
-{
-	return syscall(SYS_clone, (long)SIGCHLD, 0L, 0L, 0L, 0L);
-}
 
 static void spin(unsigned long n)
 {
@@ -36,7 +30,7 @@ int main(void)
 {
 	char c;
 	int i;
-	long p = fork_via_clone();
+	pid_t p = fork();
 
 	if (p == 0) {
 		/* The runaway: no syscalls, ever. Only a timer can take the CPU from this. */
@@ -45,11 +39,11 @@ int main(void)
 	}
 
 	if (p < 0) {
-		write(1, "\npreempttest: FAIL (clone failed)\n", 34);
+		write(1, "\npreempttest: FAIL (fork failed)\n", 33);
 		return 1;
 	}
 
-	write(1, "\npreempttest: child spinning; parent should keep running\n", 57);
+	write(1, "\npreempttest: forked; child spinning, parent should keep running\n", 65);
 	for (i = 0; i < 10; i++) {
 		spin(300000);
 		c = '.';
