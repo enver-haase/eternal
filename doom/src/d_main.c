@@ -642,7 +642,11 @@ void IdentifyVersion (void)
     home = getenv("HOME");
     if (!home)
       I_Error("Please set $HOME to your home directory");
-    sprintf(basedefault, "%s/Library/Application support/", home);
+    /* basedefault IS the config file, not a directory to put one in (see m_misc.c, which
+     * assigns it straight to defaultfile). It used to be "$HOME/Library/Application
+     * support/", trailing slash and all, so opening it could never work and the game
+     * quietly kept no settings between runs. */
+    sprintf(basedefault, "%s/default.cfg", home);
 #endif
 
     if (M_CheckParm ("-shdev"))
