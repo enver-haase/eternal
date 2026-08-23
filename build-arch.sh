@@ -326,9 +326,9 @@ if [ "$FROM" -le 8 ]; then
   log "STEP 8  boot image (--reg-base $REGBASE)"
   run python3 "$ROOT/tools/make_boot_image.py" --reg-base "$REGBASE" \
       --stack-size 536870912 "$ROOT/linux/vmlinux"
-  ls -la "$ROOT/linux/vmlinux.bootimage"
-  [ "$ROOT/linux/vmlinux.bootimage" -nt "$ROOT/linux/vmlinux" ] || {
+  ls -la "$ROOT/linux/vmlinux.subleq"
+  [ "$ROOT/linux/vmlinux.subleq" -nt "$ROOT/linux/vmlinux" ] || {
       echo "=== STEP 8 FAILED: boot image older than vmlinux (stale) ==="; exit 1; }
 fi
 
-log "BUILD-ARCH DONE $ARCH -> $ROOT/linux/vmlinux.bootimage"
+log "BUILD-ARCH DONE $ARCH -> $ROOT/linux/vmlinux.subleq"

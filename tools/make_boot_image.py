@@ -6,7 +6,7 @@ This tool takes an ELF file and:
 1. Extracts the raw binary using llvm-objcopy
 2. Reads the entry point from the ELF header using llvm-readelf
 3. Creates a boot sequence and prepends it to the binary
-4. Outputs the result to <elf_file>.bootimage
+4. Outputs the result to <elf_file>.subleq
 
 Boot sequence layout:
 - Word 0-2: Jump to word 3 (subleq 0,0,12)
@@ -83,10 +83,13 @@ def create_boot_sequence(text_start, stack_size, main_offset=0, reg_base=REG_BAS
     # kernel reserved and drew at the new address while the VM kept displaying the old one, so
     # DOOM was audible but invisible and the window showed unrelated RAM as stripes.
     boot[6] = FB_ADDR >> 2
-    # Words 7 and 8: the live mode. The kernel's fb driver republishes these on every mode set
-    # (see subleqfb_publish); these are the values in force before it probes.
-    boot[7] = FB_WIDTH
-    boot[8] = FB_HEIGHT
+    # Words 78/79: the live mode, with 'LMOD' in word 80 saying so. The kernel's fb driver
+    # republishes all three on every mode set (see subleqfb_publish); these are the values in
+    # force before it probes. Words 7 and 8 would be the obvious place and are not free -- the
+    # NOMMU guest writes its own values there, and the VM read them as a 7x16 mode.
+    boot[78] = FB_WIDTH
+    boot[79] = FB_HEIGHT
+    boot[80] = 0x4C4D4F44
 
     # ESI register-file cells at their (relocated) homes.
     boot[4 + reg_base]  = stack_size  # SP init value (stack top)
@@ -152,7 +155,7 @@ def main():
     parser.add_argument('--llvm-bin', type=str, default=LLVM_BIN,
                         help=f'Path to LLVM bin directory (default: {LLVM_BIN})')
     parser.add_argument('--output', '-o', type=str, default=None,
-                        help='Output file (default: <elf_file>.bootimage)')
+                        help='Output file (default: <elf_file>.subleq)')
     args = parser.parse_args()
 
     # Derive the text-start default from the register base if not given: the kernel
@@ -162,7 +165,7 @@ def main():
         args.text_start = 4096 * (2 if args.reg_base else 1)
 
     # Determine output filename
-    output_file = args.output if args.output else f"{args.elf_file}.bootimage"
+    output_file = args.output if args.output else f"{args.elf_file}.subleq"
     
     # Paths to LLVM tools
     llvm_objcopy = os.path.join(args.llvm_bin, "llvm-objcopy")
