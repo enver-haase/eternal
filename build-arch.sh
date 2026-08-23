@@ -295,6 +295,18 @@ if [ "$FROM" -le 7 ]; then
         --set-str CONFIG_INITRAMFS_SOURCE "../mmu_initramfs.txt"
     run make -C "$ROOT/linux" "${K[@]}" olddefconfig
   fi
+  # Keep the boot console alive alongside tty0. Without keep_bootcon the kernel hands the
+  # console to the framebuffer and stdout goes dark, so anything that happens afterwards --
+  # userspace output, an exec failure, a panic -- is only visible as pixels. That cost real
+  # time: a guest that halted seconds after boot looked like silence, and the panic was
+  # sitting on the framebuffer where nothing could read it. console=tty0 (not ttyS0) is
+  # deliberate: the guest keyboard driver picks its mode from the command line, and a ttyS
+  # console switches it to serial and stops keys reaching the game.
+  if [ -z "$DEBUG_CONSOLE" ] && [ -n "$MMU" ]; then
+    run "$ROOT/linux/scripts/config" --file "$ROOT/linux/.config" \
+        --set-str CONFIG_CMDLINE "console=tty0 keep_bootcon loglevel=7"
+    run make -C "$ROOT/linux" "${K[@]}" olddefconfig
+  fi
   # DEBUG_CONSOLE=1: route the console to ttyS0 (which writes via __subleq_putchar -> host
   # stdout) and keep the boot console, so kernel AND userspace output are visible headless
   # (default console=tty0 goes to the framebuffer, hiding userspace + any exec/panic).

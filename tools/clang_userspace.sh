@@ -39,7 +39,8 @@ BUILD="$PROJECT_ROOT/llvm-project/build/bin"
 CLANG="$BUILD/clang"
 
 # Sysroot path (contains headers and libraries from uClibc-ng)
-SYSROOT="$PROJECT_ROOT/runtime/sysroot"
+# Sysroots are per-arch since the cable-nommu/mmu split; LUNATIX_SYSROOT picks one.
+SYSROOT="${LUNATIX_SYSROOT:-$PROJECT_ROOT/runtime/sysroot}"
 
 # Note: kernel-headers provides asm/, asm-generic/, and linux/ headers
 KERNEL_HEADERS="$PROJECT_ROOT/uclibc-ng/kernel-headers/include"
