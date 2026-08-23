@@ -35,4 +35,3 @@ file /sndtest ../sndtest 0755 0 0
 file /doom ../doom/doom 0755 0 0
 file /doom1.wad ../doom/doom1.wad 0644 0 0
 
-file /etc/inittab ../mmu_inittab 0644 0 0

@@ -19,9 +19,34 @@
  */
 #include <unistd.h>
 #include <sys/wait.h>
+#include <sys/ioctl.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
+
+/* linux/kd.h values; the uClibc sysroot does not carry the header. */
+#define KDSETMODE 0x4B3A
+#define KD_TEXT   0x00
+
+
+/*
+ * Put the console back into text mode. A graphical program sets KD_GRAPHICS so fbcon stops
+ * drawing over it, and restores KD_TEXT on its way out -- but only if it gets a way out. Killed
+ * or crashed, it leaves the console mute: the last frame stays on screen and everything after
+ * it, including a kernel panic, is written to a console nobody is drawing. That is exactly what
+ * a "standstill at 100% CPU" looks like from outside. Init owns the console, so init restores
+ * it, every time a child ends.
+ */
+static void console_to_text(void)
+{
+    int fd = open("/dev/tty0", O_RDWR);
+
+    if (fd < 0)
+        return;
+    (void)ioctl(fd, KDSETMODE, KD_TEXT);
+    close(fd);
+}
 
 /* Run a program as a child and wait for it. Returns its wait status, or -1 if it never ran. */
 static int run(const char *path, const char *argv0)
@@ -40,6 +65,7 @@ static int run(const char *path, const char *argv0)
     }
     while (waitpid(pid, &status, 0) < 0)
         ;
+    console_to_text();
     return status;
 }
 
