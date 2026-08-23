@@ -316,6 +316,9 @@ if [ "$FROM" -le 7 ]; then
     run make -C "$ROOT/linux" "${K[@]}" olddefconfig
   fi
   run make -C "$ROOT/linux" "${K[@]}" -j"$(nproc)"
+  # Do not carry on past a broken kernel: step 8 would fail to find vmlinux, and the DONE line
+  # below plus an ls of the PREVIOUS image reads exactly like a successful build.
+  [ -f "$ROOT/linux/vmlinux" ] || { echo "=== STEP 7 FAILED: no linux/vmlinux ==="; exit 1; }
 fi
 
 # ---- step 8: boot image (REG_BASE=0 for cable-nommu)
@@ -324,6 +327,8 @@ if [ "$FROM" -le 8 ]; then
   run python3 "$ROOT/tools/make_boot_image.py" --reg-base "$REGBASE" \
       --stack-size 536870912 "$ROOT/linux/vmlinux"
   ls -la "$ROOT/linux/vmlinux.bootimage"
+  [ "$ROOT/linux/vmlinux.bootimage" -nt "$ROOT/linux/vmlinux" ] || {
+      echo "=== STEP 8 FAILED: boot image older than vmlinux (stale) ==="; exit 1; }
 fi
 
 log "BUILD-ARCH DONE $ARCH -> $ROOT/linux/vmlinux.bootimage"
