@@ -1,0 +1,37 @@
+# gen_init_cpio device table for the MMU BusyBox initramfs.
+# Static ET_EXEC busybox at page-1 — no shared libs needed.
+dir /bin 0755 0 0
+dir /sbin 0755 0 0
+dir /etc 0755 0 0
+dir /proc 0755 0 0
+dir /sys 0755 0 0
+dir /dev 0755 0 0
+dir /root 0700 0 0
+dir /tmp 1777 0 0
+
+# Device nodes (console is required for init's stdin/stdout/stderr)
+nod /dev/console 0600 0 0 c 5 1
+nod /dev/null 0666 0 0 c 1 3
+nod /dev/zero 0666 0 0 c 1 5
+nod /dev/ttyS0 0666 0 0 c 4 64
+nod /dev/tty 0666 0 0 c 5 0
+nod /dev/tty0 0620 0 0 c 4 0
+nod /dev/fb0 0660 0 0 c 29 0
+# (/dev/dsp + /dev/opl are provided by devtmpfs, which /doom mounts at startup.)
+
+# The static busybox and init (busybox dispatches on argv[0] basename)
+file /bin/busybox ../busybox/busybox 0755 0 0
+# fbdoom runs directly as PID 1 (kernel_execve path); it mounts devtmpfs itself.
+slink /init /preempttest 0777 0 0
+slink /sbin/init /bin/busybox 0777 0 0
+slink /bin/sh /bin/busybox 0777 0 0
+
+# Sound-device self-test (static ET_EXEC) — kept as a diagnostic tool.
+file /sndtest ../sndtest 0755 0 0
+
+# fbdoom (static ET_EXEC, page-1) + shareware WAD (found via cwd "." = /)
+file /doom ../doom/doom 0755 0 0
+file /doom1.wad ../doom/doom1.wad 0644 0 0
+
+file /etc/inittab ../mmu_inittab 0644 0 0
+file /preempttest ../preempttest 0755 0 0
