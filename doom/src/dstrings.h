@@ -38,7 +38,10 @@
 #endif
 
 // Misc. other strings.
-#define SAVEGAMENAME	"Documents/doomsav"
+/* Absolute, and somewhere that exists: this was "Documents/doomsav", relative to the
+ * working directory, so saving wrote to /Documents/doomsav0.dsg -- a directory the
+ * initramfs does not have. Saves failed and loads found nothing, both without a word. */
+#define SAVEGAMENAME	"/root/doomsav"
 
 //
 // File locations,
