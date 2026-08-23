@@ -21,8 +21,10 @@ nod /dev/fb0 0660 0 0 c 29 0
 
 # The static busybox and init (busybox dispatches on argv[0] basename)
 file /bin/busybox ../busybox/busybox 0755 0 0
-# fbdoom runs directly as PID 1 (kernel_execve path); it mounts devtmpfs itself.
-slink /init /doom 0777 0 0
+# /init forks the game and execs a shell when it exits, so quitting DOOM leaves you at a
+# prompt on a machine that is still up (init/mmuinit.c explains why neither a #! script nor
+# BusyBox init works here).
+file /init ../init/mmuinit 0755 0 0
 slink /sbin/init /bin/busybox 0777 0 0
 slink /bin/sh /bin/busybox 0777 0 0
 
