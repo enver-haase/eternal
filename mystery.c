@@ -25,6 +25,9 @@ int main(int argc, char **argv)
     args[n++] = (char *)"scummvm";
     args[n++] = (char *)"--path=" GAMEDIR;
     args[n++] = (char *)"--auto-detect";
+    /* Name the theme rather than relying on the default: a theme that is not in the image sends
+     * ScummVM to a builtin one that is not compiled in either. */
+    args[n++] = (char *)"--gui-theme=scummclassic";
     for (int i = 1; i < argc && n < 14; i++)
         args[n++] = argv[i];
     args[n] = NULL;

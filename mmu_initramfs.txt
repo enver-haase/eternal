@@ -81,6 +81,13 @@ dir /games 0755 0 0
 dir /games/mysthouse 0755 0 0
 file /usr/bin/scummvm ../scummvm 0755 0 0
 file /usr/local/share/scummvm/scummclassic.zip ../scummclassic.zip 0644 0 0
+# The default theme, and the icon set generateZipSet() looks for. Without them ScummVM falls back
+# to a builtin theme that is not there and then jumps through an unset pointer.
+file /usr/local/share/scummvm/scummremastered.zip ../scummremastered.zip 0644 0 0
+file /usr/local/share/scummvm/gui-icons.dat ../gui-icons.dat 0644 0 0
 file /games/mysthouse/MYSTHOUS.DSK ../games/mysthouse/MYSTHOUS.DSK 0644 0 0
+# Is a pointer-to-virtual-member-function callable here? ScummVM dies in its XML parser at a tiny
+# address that looks like an unresolved Itanium-ABI member pointer; this decides whose bug it is.
+file /pmftest ../pmftest 0755 0 0
 file /mystery ../mystery 0755 0 0
 slink /bin/mystery /mystery 0777 0 0
