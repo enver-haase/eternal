@@ -143,14 +143,11 @@ int main(void)
      * starts, since it is a property of the machine rather than of any one program. */
     setenv("SDL_NOMOUSE", "1", 1);
 
-    /* A timed demo exits by itself, which is what makes the framebuffer release path testable
-     * without a person at the keyboard -- and prints a frame count on the way out. */
-    /* Twice, through the launcher so DOOMWADDIR is set (plain /doom finds no IWAD now that the
-     * WADs live under /wads). Two runs in a row is the whole point: the first proves the exit
-     * path, the second reproduces "you only get to play once" without anyone at the keyboard. */
-    /* SDL first: it draws for a fixed number of frames and exits, so a capture can judge it. */
-    printf("init: starting doom\n");
-    printf("init: doom exited (status 0x%x)\n", run("/bin/doom", "doom"));
+    /* No program is started automatically: the machine comes up at a prompt, and what runs is
+     * the operator's choice -- doom / doom19 / udoom / doom2 for the game, mystery for Mystery
+     * House. (There used to be an automatic DOOM run here to make the framebuffer release path
+     * testable unattended; LUNATIX_KEYSCRIPT does that job now without the machine booting into
+     * a game, which also stopped everything typed at the prompt from landing in DOOM.) */
 
     /* From here on, a shell -- forever. Each time it ends, start another, so the machine stays
      * up whatever happens at the prompt. */
