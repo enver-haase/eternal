@@ -65,3 +65,22 @@ slink /bin/doom19 /wadrun 0777 0 0
 slink /bin/udoom /wadrun 0777 0 0
 slink /bin/doom2 /wadrun 0777 0 0
 
+# ---------------------------------------------------------------------------------------------
+# ScummVM (static ET_EXEC, SDL 1.2 backend, ADL engine only) and Hi-Res Adventure #1: Mystery
+# House. The game was released as freeware by Sierra and this is the copy ScummVM distributes
+# (md5 of the first 16 KiB matches its "Malibu Microcomputing" disk-image entry), so it may ship
+# in the image -- the DOOM WADs above may not.
+#
+# /mystery execs it with --path and the game id so the launcher GUI never appears.
+dir /usr 0755 0 0
+dir /usr/bin 0755 0 0
+dir /usr/local 0755 0 0
+dir /usr/local/share 0755 0 0
+dir /usr/local/share/scummvm 0755 0 0
+dir /games 0755 0 0
+dir /games/mysthouse 0755 0 0
+file /usr/bin/scummvm ../scummvm 0755 0 0
+file /usr/local/share/scummvm/scummclassic.zip ../scummclassic.zip 0644 0 0
+file /games/mysthouse/MYSTHOUS.DSK ../games/mysthouse/MYSTHOUS.DSK 0644 0 0
+file /mystery ../mystery 0755 0 0
+slink /bin/mystery /mystery 0777 0 0
