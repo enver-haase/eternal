@@ -181,6 +181,14 @@ if [ "$FROM" -le 6 ]; then
   # initramfs, extracted 2026-07-23, has NO ld-uClibc/libc.so; busybox+doom are static).
   # cable-NOMMU is DYNAMIC by default (upstream: kernel resolves NEEDED libs at load).
   # BUSYBOX_STATIC=1 forces static on NOMMU too (fallback if kernel dynamic linking regresses).
+  # The MMU arch must not build BusyBox for NOMMU: with CONFIG_NOMMU=y the shell uses vfork()
+  # everywhere and re-executes itself through /proc/self/exe to run a command, which on this
+  # system hangs every external program while builtins and in-process applets keep working.
+  if [ -n "$MMU" ]; then
+    sed -i 's/^CONFIG_NOMMU=y/# CONFIG_NOMMU is not set/' "$ROOT/busybox/.config"
+  else
+    sed -i 's/^# CONFIG_NOMMU is not set/CONFIG_NOMMU=y/' "$ROOT/busybox/.config"
+  fi
   if [ -n "$BUSYBOX_STATIC" ] || [ -n "$MMU" ]; then
     sed -i 's/^# CONFIG_STATIC is not set/CONFIG_STATIC=y/' "$ROOT/busybox/.config"
     grep -q '^CONFIG_EXTRA_LDFLAGS=.*-static' "$ROOT/busybox/.config" || \
@@ -295,6 +303,16 @@ if [ "$FROM" -le 7 ]; then
         --set-str CONFIG_INITRAMFS_SOURCE "../mmu_initramfs.txt"
     run make -C "$ROOT/linux" "${K[@]}" olddefconfig
   fi
+  # A blocked task must say so. Without this a child that never runs looks exactly like a child
+  # that is merely slow -- which is how "udoom just hangs" was indistinguishable from "udoom is
+  # loading a 12 MB WAD". 30 s is short enough to be useful and long enough not to fire on the
+  # genuinely slow startup this machine has.
+  if [ -n "$MMU" ]; then
+    run "$ROOT/linux/scripts/config" --file "$ROOT/linux/.config" \
+        --enable CONFIG_DETECT_HUNG_TASK --set-val CONFIG_DEFAULT_HUNG_TASK_TIMEOUT 30
+    run make -C "$ROOT/linux" "${K[@]}" olddefconfig
+  fi
+
   # Keep the boot console alive alongside tty0. Without keep_bootcon the kernel hands the
   # console to the framebuffer and stdout goes dark, so anything that happens afterwards --
   # userspace output, an exec failure, a panic -- is only visible as pixels. That cost real

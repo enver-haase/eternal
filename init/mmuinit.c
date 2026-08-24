@@ -20,6 +20,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/ioctl.h>
+#include <sys/mount.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -122,6 +123,18 @@ static int run3(const char *path, const char *argv0, const char *a1, const char 
 
 int main(void)
 {
+    /*
+     * Mount /proc. BusyBox's shell re-executes itself through /proc/self/exe -- for subshells
+     * always, and for external commands too when it is built for NOMMU -- so without procfs the
+     * shell answers "can't re-execute the shell" and running any program from the prompt simply
+     * hangs. Builtins and in-process applets keep working, which makes it look like a problem
+     * with the program rather than a missing filesystem.
+     */
+    if (mount("proc", "/proc", "proc", 0, NULL) != 0)
+        printf("init: cannot mount /proc (errno %d)\n", errno);
+    if (mount("sysfs", "/sys", "sysfs", 0, NULL) != 0)
+        printf("init: cannot mount /sys (errno %d)\n", errno);
+
     /* So that typing `doom` at the prompt finds it: the game lives in /, not in /bin. */
     setenv("PATH", "/bin:/sbin:/", 1);
     setenv("HOME", "/root", 1);
@@ -136,16 +149,8 @@ int main(void)
      * WADs live under /wads). Two runs in a row is the whole point: the first proves the exit
      * path, the second reproduces "you only get to play once" without anyone at the keyboard. */
     /* SDL first: it draws for a fixed number of frames and exits, so a capture can judge it. */
-    printf("init: pthreadtest\n");
-    printf("init: pthreadtest exited (status 0x%x)\n", run("/pthreadtest", "pthreadtest"));
-    printf("init: sdltest\n");
-    printf("init: sdltest exited (status 0x%x)\n", run("/sdltest", "sdltest"));
-    printf("init: RUN 1 -- doom -timedemo demo1\n");
-    printf("init: RUN 1 exited (status 0x%x)\n",
-           run3("/bin/doom", "doom", "-timedemo", "demo1"));
-    printf("init: RUN 2 -- doom -timedemo demo1\n");
-    printf("init: RUN 2 exited (status 0x%x)\n",
-           run3("/bin/doom", "doom", "-timedemo", "demo1"));
+    printf("init: starting doom\n");
+    printf("init: doom exited (status 0x%x)\n", run("/bin/doom", "doom"));
 
     /* From here on, a shell -- forever. Each time it ends, start another, so the machine stays
      * up whatever happens at the prompt. */
