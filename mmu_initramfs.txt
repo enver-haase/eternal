@@ -96,5 +96,8 @@ file /sdlthreadtest ../sdlthreadtest 0755 0 0
 file /ptprobe ../ptprobe 0755 0 0
 file /sigprobe ../sigprobe 0755 0 0
 file /sdlprobe ../sdlprobe 0755 0 0
+# Does an SDL program see key events here? (SDL built with DEBUG_KEYBOARD for this image.)
+file /keytest ../keytest 0755 0 0
+file /etc/scummvm.ini ../scummvm.ini 0644 0 0
 file /mystery ../mystery 0755 0 0
 slink /bin/mystery /mystery 0777 0 0
