@@ -107,6 +107,9 @@ file /sigprobe2 ../sigprobe2 0755 0 0
 file /condprobe ../condprobe 0755 0 0
 file /sdlaudio ../sdlaudio 0755 0 0
 file /bigthread ../bigthread 0755 0 0
+file /spin2-O0 ../spin2-O0 0755 0 0
+file /spin2-O1 ../spin2-O1 0755 0 0
+file /spin2-O2 ../spin2-O2 0755 0 0
 file /sdlorder ../sdlorder 0755 0 0
 file /thr2 ../thr2 0755 0 0
 file /sdlprobe ../sdlprobe 0755 0 0
