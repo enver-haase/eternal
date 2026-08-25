@@ -113,6 +113,7 @@ file /sdlprobe ../sdlprobe 0755 0 0
 # Does an SDL program see key events here? (SDL built with DEBUG_KEYBOARD for this image.)
 file /keytest ../keytest 0755 0 0
 file /etc/scummvm.ini ../scummvm.ini 0644 0 0
+file /etc/scummvm-sound.ini ../scummvm-sound.ini 0644 0 0
 # Dynamic-linking experiment: the same launcher without -static is 7 KB instead of 1.5 MB, and
 # needs libc.so at runtime. The MMU loader has never been asked for an ET_DYN binary, so this is
 # kept beside the static one rather than replacing it -- if it fails, `mystery` still works.
