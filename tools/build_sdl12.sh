@@ -9,11 +9,12 @@
 #
 # Everything is disabled except fbcon video. Static only: the MMU userspace is static ET_EXEC.
 #
-# --disable-threads is not a preference: uClibc's linuxthreads faults on this port even for
+# Threads are ON again: uClibc's linuxthreads used to fault at address 0 on this port -- with
 # pthread_mutex_lock() on a static PTHREAD_MUTEX_INITIALIZER (see init/pthreadtest.c), and with
-# threads enabled SDL_Init dies inside __pthread_lock. Audio goes with them -- SDL 1.2 feeds the
+# threads enabled SDL_Init died inside __pthread_lock, and audio went with them. Fixed in the
 # device from a thread -- so a thread-free SDL gives graphics and input but no sound. Turning
-# threads back on is a libc job, not an SDL one.
+# libc and the kernel (kernel-assisted testandset, clone.S trapping from clone itself), so SDL
+# gets its timer thread and its OSS audio thread here.
 set -o pipefail
 ROOT="$HOME/git/eternal"
 SRC="$HOME/git/sdl12/SDL-1.2.15"
@@ -69,9 +70,9 @@ CC="$CC" CFLAGS="$CFLAGS" LDFLAGS="--sysroot=$SYS" \
   --disable-video-svga --disable-video-vgl --disable-video-aalib --disable-video-caca \
   --disable-video-opengl --disable-video-photon --disable-video-ps3 --disable-video-dummy \
   --disable-esd --disable-arts --disable-nas --disable-pulseaudio \
-  --disable-threads \
   --disable-alsa --disable-esd --disable-arts --disable-nas --disable-pulseaudio \
   --disable-diskaudio --disable-dummyaudio \
+  --enable-oss \
   --disable-joystick --disable-cdrom --disable-nasm --disable-assembly --disable-altivec \
   --disable-sdl-dlopen --disable-input-tslib --disable-mintaudio \
   2>&1 | tail -25

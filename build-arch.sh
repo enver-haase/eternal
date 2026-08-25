@@ -108,7 +108,11 @@ export SUBLEQ_REG_BASE="$REGBASE"             # runtime generator (gen_runtime.p
 LOG="$ROOT/build-$ARCH.log"
 
 log(){ echo "=== $* ==="; }
-run(){ echo "+ $*"; "$@"; }
+# A failing command must stop the build. Without the status check every later step ran on stale
+# output and the script still printed "BUILD-ARCH DONE" with a boot image from the previous run --
+# which has cost real debugging time more than once (a uClibc that did not compile, an image that
+# was never rebuilt). The per-step file checks further down catch some of it; this catches all.
+run(){ echo "+ $*"; if ! "$@"; then echo "=== FAILED: $* ==="; exit 1; fi; }
 
 [ -x "$CLANG" ] || { echo "toolchain missing: $CLANG (build step 1 first)"; exit 1; }
 "$CLANG" --version | grep -q "subleq-unknown-linux" || { echo "clang is not subleq-targeted"; exit 1; }
