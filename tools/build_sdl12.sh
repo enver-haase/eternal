@@ -9,12 +9,17 @@
 #
 # Everything is disabled except fbcon video. Static only: the MMU userspace is static ET_EXEC.
 #
-# Threads are ON again: uClibc's linuxthreads used to fault at address 0 on this port -- with
-# pthread_mutex_lock() on a static PTHREAD_MUTEX_INITIALIZER (see init/pthreadtest.c), and with
-# threads enabled SDL_Init died inside __pthread_lock, and audio went with them. Fixed in the
-# device from a thread -- so a thread-free SDL gives graphics and input but no sound. Turning
-# libc and the kernel (kernel-assisted testandset, clone.S trapping from clone itself), so SDL
-# gets its timer thread and its OSS audio thread here.
+# Threads are ON as of 2026-08-25, because the reason they were off is fixed. The history, since it
+# was wrong twice: linuxthreads first faulted at address 0 here (userspace cannot disable interrupts
+# under MMU -- the kernel now provides the atomic exchange), then mutexes and pthread_create worked
+# but pthread_cond_wait hung, and SDL_Init deadlocked inside it. That hang was a signal delivered at
+# syscall exit whose handler was never entered (kernel 65b79b6f); /ptprobe and /condprobe both pass
+# now. Threads are what SDL audio needs -- it feeds the device from a thread -- so a thread-free SDL
+# gave graphics and input but no sound at all.
+#
+# ScummVM does not depend on SDL threads either way (its timer manager is driven from our main
+# loop), so if SDL_Init ever deadlocks again, --disable-threads is the way back to a working
+# picture: the sound goes, nothing else does.
 set -o pipefail
 ROOT="$HOME/git/eternal"
 SRC="$HOME/git/sdl12/SDL-1.2.15"
@@ -73,6 +78,7 @@ CC="$CC" CFLAGS="$CFLAGS" LDFLAGS="--sysroot=$SYS" \
   --disable-alsa --disable-esd --disable-arts --disable-nas --disable-pulseaudio \
   --disable-diskaudio --disable-dummyaudio \
   --enable-oss \
+  --enable-threads \
   --disable-joystick --disable-cdrom --disable-nasm --disable-assembly --disable-altivec \
   --disable-sdl-dlopen --disable-input-tslib --disable-mintaudio \
   2>&1 | tail -25
