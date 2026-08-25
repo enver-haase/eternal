@@ -133,7 +133,7 @@ int main(void)
     /*
      * devtmpfs first: the sound devices are misc devices with dynamic minors, so no static node
      * can name them, and without /dev/dsp SDL reports "No available audio device". devtmpfs also
-     * supplies console/null/zero/tty*/fb0, so nothing is lost by covering the static set.
+     * supplies console, null, zero, the ttys and fb0, so nothing is lost by covering the static set.
      */
     if (mount("devtmpfs", "/dev", "devtmpfs", 0, NULL) != 0)
         printf("init: cannot mount /dev (errno %d)\n", errno);
