@@ -295,6 +295,19 @@ if [ "$FROM" -le 7 ] && [ -n "$MMU" ]; then
   CCU="$TC/bin/clang --sysroot=$SYSM -isystem $SYSM/kernel-headers/include -O2 -static"
   SDLC="$($SYSM/bin/sdl-config --cflags 2>/dev/null)"
   SDLL="$($SYSM/bin/sdl-config --libs 2>/dev/null)"
+  # Binaries that are BUILT IN ANOTHER TREE and only copied in here. Same trap as the helpers
+  # above, one step further away: mmu_initramfs.txt packs ../scummvm, which is a copy, so
+  # rebuilding ScummVM in ~/git/scummvm changed nothing about the image. That cost an evening of
+  # chasing "Couldn't create audio thread" through SDL, linuxthreads and the kernel -- the packed
+  # ScummVM was simply an older link against the thread-less SDL.
+  for pair in "$HOME/git/scummvm/scummvm:$ROOT/scummvm"; do
+    from="${pair%%:*}"; to="${pair##*:}"
+    if [ -f "$from" ] && { [ ! -f "$to" ] || [ "$from" -nt "$to" ]; }; then
+      echo "+ copying $(basename "$from") from $(dirname "$from") (it is newer)"
+      run cp "$from" "$to"
+    fi
+  done
+
   # source                binary            extra link flags
   while read -r src bin extra; do
     [ -f "$ROOT/$src" ] || continue
@@ -316,6 +329,10 @@ sdlaudio.c sdlaudio
 sdlprobe.c sdlprobe
 keytest.c keytest
 tickstest.c tickstest
+sdlthreadtest.c sdlthreadtest
+thr2.c thr2 -lpthread
+bigthread.c bigthread -lpthread
+sdlorder.c sdlorder
 HELPERS
 fi
 

@@ -65,6 +65,50 @@ PYEOF
   }
 done
 
+# Say WHY a thread could not be created. SDL reports "Not enough resources to create thread" for
+# every pthread_create failure, and SDL_OpenAudio then replaces even that with "Couldn't create
+# audio thread", so the one number that identifies the fault never reaches anybody. That cost an
+# evening: ScummVM could not start its audio thread, and the message was identical whether the
+# cause was a broken condition variable, a missing device, or -- as it turned out -- a stale binary
+# linked against a thread-less SDL. Nothing in the output could tell them apart.
+python3 - <<'SDLDIAG'
+p = "src/thread/pthread/SDL_systhread.c"; s = open(p).read()
+old = """\tif ( pthread_create(&thread->handle, &type, RunThread, args) != 0 ) {
+\t\tSDL_SetError("Not enough resources to create thread");
+\t\treturn(-1);
+\t}"""
+new = """\t{
+\t\tint rc_ = pthread_create(&thread->handle, &type, RunThread, args);
+\t\tif ( rc_ != 0 ) {
+\t\t\t/* lunatix: the rc and errno ARE the diagnosis; "not enough resources" is not. */
+\t\t\tSDL_SetError("pthread_create failed: rc=%d errno=%d", rc_, errno);
+\t\t\treturn(-1);
+\t\t}
+\t}"""
+if old in s:
+    s = s.replace(old, new, 1)
+    if "#include <errno.h>" not in s:
+        s = s.replace("#include <pthread.h>", "#include <pthread.h>\n#include <errno.h>", 1)
+    open(p, "w").write(s)
+    print("SDL_systhread.c: reports rc and errno")
+else:
+    print("SDL_systhread.c: already patched (or changed upstream)")
+
+p = "src/audio/SDL_audio.c"; s = open(p).read()
+old = '\t\tSDL_SetError("Couldn\'t create audio thread");'
+new = """\t\t{
+\t\t\t/* lunatix: carry the reason forward instead of overwriting it. */
+\t\t\tchar why_[128];
+\t\t\tSDL_strlcpy(why_, SDL_GetError(), sizeof why_);
+\t\t\tSDL_SetError("Couldn't create audio thread: %s", why_);
+\t\t}"""
+if old in s:
+    open(p, "w").write(s.replace(old, new, 1))
+    print("SDL_audio.c: keeps the inner error")
+else:
+    print("SDL_audio.c: already patched (or changed upstream)")
+SDLDIAG
+
 CC="$CC" CFLAGS="$CFLAGS" LDFLAGS="--sysroot=$SYS" \
 ./configure \
   --host=subleq-unknown-linux-gnu \
