@@ -88,6 +88,14 @@ file /games/mysthouse/MYSTHOUS.DSK ../games/mysthouse/MYSTHOUS.DSK 0644 0 0
 # Is a pointer-to-virtual-member-function callable here? ScummVM dies in its XML parser at a tiny
 # address that looks like an unresolved Itanium-ABI member pointer; this decides whose bug it is.
 file /pmftest ../pmftest 0755 0 0
+# Is a pointer-to-member still intact after being stored in an object? (the ScummVM crash shape)
+file /pmfstore ../pmfstore 0755 0 0
+# The same shape split across translation units, which is how ScummVM actually hits it.
+file /pmf2 ../pmf2 0755 0 0
+# Same repro at three optimisation levels, to bracket where the miscompile starts.
+file /pmf2-O0 ../pmf2-O0 0755 0 0
+file /pmf2-O1 ../pmf2-O1 0755 0 0
+file /pmf2-O2 ../pmf2-O2 0755 0 0
 # Does time advance for an SDL program here? ScummVM sits on a timed splash forever.
 file /tickstest ../tickstest 0755 0 0
 # Which layer of SDL threading works: mutex, semaphore, condvar, thread, timer, audio.
@@ -99,5 +107,11 @@ file /sdlprobe ../sdlprobe 0755 0 0
 # Does an SDL program see key events here? (SDL built with DEBUG_KEYBOARD for this image.)
 file /keytest ../keytest 0755 0 0
 file /etc/scummvm.ini ../scummvm.ini 0644 0 0
+# Dynamic-linking experiment: the same launcher without -static is 7 KB instead of 1.5 MB, and
+# needs libc.so at runtime. The MMU loader has never been asked for an ET_DYN binary, so this is
+# kept beside the static one rather than replacing it -- if it fails, `mystery` still works.
+dir /lib 0755 0 0
+file /lib/libc.so ../runtime/sysroot-mmu/lib/libc.so 0755 0 0
+file /mystery-dyn ../mystery-dyn 0755 0 0
 file /mystery ../mystery 0755 0 0
 slink /bin/mystery /mystery 0777 0 0
