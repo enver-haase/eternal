@@ -94,6 +94,9 @@ file /pmfstore ../pmfstore 0755 0 0
 file /pmf2 ../pmf2 0755 0 0
 # Same repro at three optimisation levels, to bracket where the miscompile starts.
 file /pmf2-O0 ../pmf2-O0 0755 0 0
+file /pmf3-O0 ../pmf3-O0 0755 0 0
+file /pmf3-O1 ../pmf3-O1 0755 0 0
+file /pmf3-O2 ../pmf3-O2 0755 0 0
 file /pmf2-O1 ../pmf2-O1 0755 0 0
 file /pmf2-O2 ../pmf2-O2 0755 0 0
 # Does time advance for an SDL program here? ScummVM sits on a timed splash forever.
