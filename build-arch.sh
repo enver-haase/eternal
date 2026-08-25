@@ -279,6 +279,46 @@ SH
   run chmod +x "$ROOT/initramfs_root/init"
 fi
 
+# ---- step 6.7 (MMU only): rebuild the userspace helpers whose source is newer than their binary.
+#
+# mmu_initramfs.txt packs BINARIES that nothing in this script used to build, so editing one of
+# these .c files and running a full build produced an image with the OLD program in it -- silently,
+# because the cpio step is perfectly happy with a stale file. That cost an evening: init/mmuinit.c
+# grew the devtmpfs mount that /dev/dsp needs, the binary was a day older, and SDL kept reporting
+# "No available audio device" while the source plainly mounted /dev.
+#
+# So: compare timestamps and rebuild what is behind. Not a full rebuild -- just a guard that the
+# image contains the source that is in the tree.
+if [ "$FROM" -le 7 ] && [ -n "$MMU" ]; then
+  log "STEP 6.7  MMU userspace helpers (rebuild if the source is newer)"
+  SYSM="$ROOT/runtime/sysroot-mmu"
+  CCU="$TC/bin/clang --sysroot=$SYSM -isystem $SYSM/kernel-headers/include -O2 -static"
+  SDLC="$($SYSM/bin/sdl-config --cflags 2>/dev/null)"
+  SDLL="$($SYSM/bin/sdl-config --libs 2>/dev/null)"
+  # source                binary            extra link flags
+  while read -r src bin extra; do
+    [ -f "$ROOT/$src" ] || continue
+    if [ -f "$ROOT/$bin" ] && [ ! "$ROOT/$src" -nt "$ROOT/$bin" ]; then continue; fi
+    echo "+ rebuilding $bin (source is newer)"
+    # shellcheck disable=SC2086
+    if ! (cd "$ROOT" && $CCU $SDLC -o "$bin" "$src" $extra $SDLL); then
+      echo "=== FAILED: rebuild of $bin ==="; exit 1
+    fi
+  done <<'HELPERS'
+init/mmuinit.c init/mmuinit
+wadrun.c wadrun
+mystery.c mystery
+ptprobe.c ptprobe -lpthread
+condprobe.c condprobe -lpthread
+sigprobe.c sigprobe
+sigprobe2.c sigprobe2
+sdlaudio.c sdlaudio
+sdlprobe.c sdlprobe
+keytest.c keytest
+tickstest.c tickstest
+HELPERS
+fi
+
 # ---- step 7: kernel (NOMMU: CONFIG_MMU unset via defconfig) -> linux/vmlinux
 if [ "$FROM" -le 7 ]; then
   log "STEP 7  kernel mrproper + defconfig + build"
