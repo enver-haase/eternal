@@ -113,12 +113,19 @@ file /sdlprobe ../sdlprobe 0755 0 0
 # Does an SDL program see key events here? (SDL built with DEBUG_KEYBOARD for this image.)
 file /keytest ../keytest 0755 0 0
 file /etc/scummvm.ini ../scummvm.ini 0644 0 0
-file /etc/scummvm-sound.ini ../scummvm-sound.ini 0644 0 0
+file /etc/scummvm-silent.ini ../scummvm-silent.ini 0644 0 0
 # Dynamic-linking experiment: the same launcher without -static is 7 KB instead of 1.5 MB, and
 # needs libc.so at runtime. The MMU loader has never been asked for an ET_DYN binary, so this is
 # kept beside the static one rather than replacing it -- if it fails, `mystery` still works.
 dir /lib 0755 0 0
 file /lib/libc.so ../runtime/sysroot-mmu/lib/libc.so 0755 0 0
 file /mystery-dyn ../mystery-dyn 0755 0 0
-file /mystery ../mystery 0755 0 0
+file /adlrun ../adlrun 0755 0 0
+slink /mystery /adlrun 0777 0 0
+slink /timezone /adlrun 0777 0 0
+# Time Zone's twelve Apple II disk images are not here: unlike Mystery House, which
+# Sierra released as freeware in 1987, Time Zone was never released that way -- same
+# rule as the DOOM WADs. The directory exists so /timezone can say what is missing.
+dir /games/timezone 0755 0 0
 slink /bin/mystery /mystery 0777 0 0
+slink /bin/timezone /timezone 0777 0 0

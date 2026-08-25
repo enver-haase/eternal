@@ -320,7 +320,7 @@ if [ "$FROM" -le 7 ] && [ -n "$MMU" ]; then
   done <<'HELPERS'
 init/mmuinit.c init/mmuinit
 wadrun.c wadrun
-mystery.c mystery
+adlrun.c adlrun
 ptprobe.c ptprobe -lpthread
 condprobe.c condprobe -lpthread
 sigprobe.c sigprobe
