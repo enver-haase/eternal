@@ -39,6 +39,11 @@ static const struct edition {
     { "mystery",  "hires1", "/games/mysthouse",
       "Hi-Res Adventure #1: Mystery House (1980, freeware since 1987)", 1,
       "MYSTHOUS.DSK" },
+    { "wizard",   "hires2", "/games/wizard",
+      "Hi-Res Adventure #2: Wizard and the Princess (1980)", 0,
+      "one Apple II disk image named \"wizard\" -- ScummVM wants the 13-sector DOS 3.2 version of\n"
+      "         116480 bytes; the Roberta Williams Anthology ships a 16-sector 143360-byte image,\n"
+      "         which may or may not be readable" },
     { "timezone", "hires5", "/games/timezone",
       "Hi-Res Adventure #5: Time Zone (1982)", 0,
       "twelve Apple II disk images of 143360 bytes each, named tzone1a tzone1b tzone2c tzone2d\n"
@@ -81,7 +86,14 @@ int main(int argc, char **argv)
     /* --sound opens the audio device even for a game that has none (for testing the audio path);
      * --silent is the other way round, for a game that has sound but is not worth the cycles. */
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--sound") == 0)  { sound = 1;  argv[i] = NULL; }
+        /* `continue` after a match is not tidiness, it is correctness. This loop used to fall
+         * through to the second strcmp with argv[i] already set to NULL, and strcmp(NULL, ...) is
+         * undefined -- so the compiler concluded the first branch could never be taken and deleted
+         * the "--sound" comparison outright. The string literal was not even emitted. The symptom
+         * was `mystery --sound` printing "[silent: no audio device]" and ScummVM then complaining
+         * about an unrecognised option it had been handed. */
+        if (!argv[i]) continue;
+        if (strcmp(argv[i], "--sound") == 0)  { sound = 1;  argv[i] = NULL; continue; }
         if (strcmp(argv[i], "--silent") == 0) { sound = -1; argv[i] = NULL; }
     }
     if (sound == 0) sound = ed->silent ? -1 : 1;
