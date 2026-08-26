@@ -247,7 +247,9 @@ if [ "$FROM" -le 6 ] && [ -n "$WITH_DOOM" ]; then
   # crt1.o bug). Remove all objects so every .o is compiled fresh by $CLANG -> uniform toolchain.
   run rm -rf "$ROOT/doom/build"
   run find "$ROOT/doom" -name '*.o' -delete
-  run make -C "$ROOT/doom" clean
+  # No "make clean" here: doom's Makefile has no clean target, and since run() aborts on failure
+  # that turned WITH_DOOM=1 into an instant build failure. The two lines above (rm -rf build, find
+  # -name '*.o' -delete) are the clean, and they do not depend on the Makefile having a target.
   run make -C "$ROOT/doom" CC="$CLANG" MC="$TC/bin/llvm-mc" -j"$(nproc)"
   run mkdir -p "$ROOT/initramfs_root/root/doom"
   run cp "$ROOT/doom/doom" "$ROOT/initramfs_root/root/doom/doom"
@@ -311,7 +313,12 @@ if [ "$FROM" -le 7 ] && [ -n "$MMU" ]; then
   # source                binary            extra link flags
   while read -r src bin extra; do
     [ -f "$ROOT/$src" ] || continue
-    if [ -f "$ROOT/$bin" ] && [ ! "$ROOT/$src" -nt "$ROOT/$bin" ]; then continue; fi
+    # Newer SOURCE is the obvious trigger; a newer COMPILER is the one that got missed. The
+    # toolchain was rebuilt to fix an indirect-tail-call miscompile, every binary here was built by
+    # the broken one, and none of their sources had changed -- so a full rebuild left them exactly
+    # as wrong as before. Compare against clang too.
+    if [ -f "$ROOT/$bin" ] && [ ! "$ROOT/$src" -nt "$ROOT/$bin" ] \
+                           && [ ! "$TC/bin/clang" -nt "$ROOT/$bin" ]; then continue; fi
     echo "+ rebuilding $bin (source is newer)"
     # shellcheck disable=SC2086
     if ! (cd "$ROOT" && $CCU $SDLC -o "$bin" "$src" $extra $SDLL); then
@@ -333,6 +340,7 @@ sdlthreadtest.c sdlthreadtest
 thr2.c thr2 -lpthread
 bigthread.c bigthread -lpthread
 sdlorder.c sdlorder
+tailc.c tailc tailc_helper.c
 HELPERS
 fi
 

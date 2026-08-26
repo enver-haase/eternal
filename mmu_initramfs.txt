@@ -115,6 +115,7 @@ file /spin2-O1 ../spin2-O1 0755 0 0
 file /spin2-O2 ../spin2-O2 0755 0 0
 file /sdlorder ../sdlorder 0755 0 0
 file /thr2 ../thr2 0755 0 0
+file /tailc ../tailc 0755 0 0
 file /sdlprobe ../sdlprobe 0755 0 0
 # Does an SDL program see key events here? (SDL built with DEBUG_KEYBOARD for this image.)
 file /keytest ../keytest 0755 0 0
@@ -129,9 +130,21 @@ file /mystery-dyn ../mystery-dyn 0755 0 0
 file /adlrun ../adlrun 0755 0 0
 slink /mystery /adlrun 0777 0 0
 slink /timezone /adlrun 0777 0 0
-# Time Zone's twelve Apple II disk images are not here: unlike Mystery House, which
-# Sierra released as freeware in 1987, Time Zone was never released that way -- same
-# rule as the DOOM WADs. The directory exists so /timezone can say what is missing.
+# Time Zone's twelve Apple II disks, as NIBBLE images from the Roberta Williams Anthology.
+# Like the DOOM WADs these are licensed data: games/ is in .gitignore and they exist only
+# on a machine that has the anthology. Without them /timezone says what is missing.
 dir /games/timezone 0755 0 0
+file /games/timezone/tzone1a.nib ../games/timezone/tzone1a.nib 0644 0 0
+file /games/timezone/tzone1b.nib ../games/timezone/tzone1b.nib 0644 0 0
+file /games/timezone/tzone2c.nib ../games/timezone/tzone2c.nib 0644 0 0
+file /games/timezone/tzone2d.nib ../games/timezone/tzone2d.nib 0644 0 0
+file /games/timezone/tzone3e.nib ../games/timezone/tzone3e.nib 0644 0 0
+file /games/timezone/tzone3f.nib ../games/timezone/tzone3f.nib 0644 0 0
+file /games/timezone/tzone4g.nib ../games/timezone/tzone4g.nib 0644 0 0
+file /games/timezone/tzone4h.nib ../games/timezone/tzone4h.nib 0644 0 0
+file /games/timezone/tzone5i.nib ../games/timezone/tzone5i.nib 0644 0 0
+file /games/timezone/tzone5j.nib ../games/timezone/tzone5j.nib 0644 0 0
+file /games/timezone/tzone6k.nib ../games/timezone/tzone6k.nib 0644 0 0
+file /games/timezone/tzone6l.nib ../games/timezone/tzone6l.nib 0644 0 0
 slink /bin/mystery /mystery 0777 0 0
 slink /bin/timezone /timezone 0777 0 0

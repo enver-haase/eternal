@@ -1,1 +1,2 @@
 wads/   # licensed IWADs: never commit these
+games/  # licensed game data (Time Zone and friends): never commit these either
