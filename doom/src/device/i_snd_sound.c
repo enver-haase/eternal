@@ -36,7 +36,22 @@
 //  and the samplerate of the raw data.
 #define SAMPLECOUNT		512
 #define NUM_CHANNELS		8
-#define SAMPLERATE		11025	// Hz
+/*
+ * 5512 Hz, half the DMX samples' native 11025.
+ *
+ * This machine cannot mix 11025 frames a second while also running the game. Measured with the host
+ * reporting production against consumption every ten seconds, DOOM supplied 42-61% of what an
+ * 11025 Hz card took -- so the device underran about half the time and the effects stuttered, and no
+ * amount of buffering fixed it (743 ms of queue, asked for through SNDCTL_DSP_SETFRAGMENT, changed
+ * nothing: a buffer only defers a deficit).
+ *
+ * Halving the rate halves the work, which turns ~50% of real time into ~100%. The DMX lumps are
+ * 11025 Hz, so the conversion is an exact 2:1 decimation -- advance two source samples per output
+ * frame, below -- and costs no filtering or arithmetic. It trades the top octave of a gunshot for
+ * one that does not break up, which on a machine running at 1.5 frames a second is a bargain.
+ */
+#define SAMPLERATE		5512	// Hz (DMX samples are 11025: exact 2:1 decimation)
+#define DMX_STEP		2	// source samples consumed per output frame
 #define SAMPLESIZE		2	// 16bit
 
 // /dev/dsp file descriptor; -1 means sound is disabled (open failed).
@@ -301,8 +316,10 @@ void I_UpdateSound(void)
 	    dl += channelleftvol_lookup[chan][*channels[chan]];
 	    dr += channelrightvol_lookup[chan][*channels[chan]];
 
-	    // Advance one sample (native rate, no pitch shift).
-	    channels[chan]++;
+	    /* Advance DMX_STEP samples: the lumps are 11025 Hz and we output 5512, so every other
+	     * sample is dropped. No pitch shift, no filter, no arithmetic -- and half the mixing
+	     * work, which is the whole point (see SAMPLERATE). */
+	    channels[chan] += DMX_STEP;
 
 	    if (channels[chan] >= channelsend[chan])
 		channels[chan] = 0;
@@ -375,6 +392,23 @@ void I_InitSound(void)
     ioctl(audio_fd, SNDCTL_DSP_STEREO, &stereo);
     speed = SAMPLERATE;
     ioctl(audio_fd, SNDCTL_DSP_SPEED, &speed);
+
+    /*
+     * Ask for a LARGE buffer, which is the opposite of what a game normally wants.
+     *
+     * This machine cannot produce audio as fast as the card consumes it: measured with the host
+     * reporting every ten seconds, DOOM supplies 41-54% of the frames an 11025 Hz device takes. A
+     * short queue therefore does not buy tight timing, it buys dropouts -- every gap between our
+     * bursts is silence the card has to fill. Latency costs little here (a gunshot 700 ms late is
+     * still a gunshot; the machine renders at about 1.5 frames a second anyway) while continuity
+     * costs a lot, so take the largest buffer the driver will grant.
+     *
+     * The other guest on this image wants the opposite and says so through the same ioctl: ScummVM
+     * makes 100 ms beeps and asks SDL for a short buffer, because everything it plays is heard late
+     * by exactly the queue depth. That is why this is an ioctl and not a constant in the driver.
+     */
+    { int frag = (8 << 16) | 12;      /* 8 fragments x 4096 bytes = 8192 frames, ~740 ms */
+      ioctl(audio_fd, SNDCTL_DSP_SETFRAGMENT, &frag); }
 
     I_SetChannels();
 
