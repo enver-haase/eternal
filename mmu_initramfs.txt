@@ -130,9 +130,12 @@ file /mystery-dyn ../mystery-dyn 0755 0 0
 file /adlrun ../adlrun 0755 0 0
 slink /mystery /adlrun 0777 0 0
 slink /timezone /adlrun 0777 0 0
+slink /wizard /adlrun 0777 0 0
 # Time Zone's twelve Apple II disks, as NIBBLE images from the Roberta Williams Anthology.
 # Like the DOOM WADs these are licensed data: games/ is in .gitignore and they exist only
 # on a machine that has the anthology. Without them /timezone says what is missing.
+dir /games/wizard 0755 0 0
+file /games/wizard/wizard ../games/wizard/wizard 0644 0 0
 dir /games/timezone 0755 0 0
 file /games/timezone/tzone1a.nib ../games/timezone/tzone1a.nib 0644 0 0
 file /games/timezone/tzone1b.nib ../games/timezone/tzone1b.nib 0644 0 0
@@ -148,3 +151,4 @@ file /games/timezone/tzone6k.nib ../games/timezone/tzone6k.nib 0644 0 0
 file /games/timezone/tzone6l.nib ../games/timezone/tzone6l.nib 0644 0 0
 slink /bin/mystery /mystery 0777 0 0
 slink /bin/timezone /timezone 0777 0 0
+slink /bin/wizard /wizard 0777 0 0
